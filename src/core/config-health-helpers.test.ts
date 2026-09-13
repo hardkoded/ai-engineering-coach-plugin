@@ -48,6 +48,27 @@ describe('resolveWorkspaceRoot', () => {
     const root = makeTempDir();
     expect(resolveWorkspaceRoot('codex-proj-1234', { id: 'codex-proj-1234', name: 'proj', path: root })).toBe(root);
   });
+
+  it('uses the checkout path for a Claude workspace', () => {
+    // The parser stores the session `cwd` here, not the `~/.claude/projects` log
+    // directory. Scanning for `*.jsonl` instead dropped every Claude workspace out
+    // of Context Health.
+    const root = makeTempDir();
+    writeFile(root, 'CLAUDE.md', '# Project\n');
+    expect(resolveWorkspaceRoot('claude--Users-me-code-proj', { id: 'claude--Users-me-code-proj', name: 'proj', path: root })).toBe(root);
+  });
+
+  it('returns null for a Claude workspace whose checkout is gone', () => {
+    const missing = path.join(makeTempDir(), 'deleted');
+    expect(resolveWorkspaceRoot('claude-gone', { id: 'claude-gone', name: 'gone', path: missing })).toBeNull();
+  });
+
+  it('never treats the Claude log tree as a checkout', () => {
+    // The parser falls back to `~/.claude/projects` when the session cwd is gone.
+    // Auditing that directory would report the log store as a badly configured repo.
+    const projectsRoot = path.join(os.homedir(), '.claude', 'projects');
+    expect(resolveWorkspaceRoot('claude-wt1', { id: 'claude-wt1', name: 'wt1', path: projectsRoot })).toBeNull();
+  });
 });
 
 describe('scanConfigFiles', () => {

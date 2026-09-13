@@ -119,6 +119,34 @@ After install:
 
 ---
 
+## Run as a standalone CLI
+
+If you work in a terminal, you do not need VS Code or the Copilot app at all. Build once, then
+run the dashboard as a local web app:
+
+```bash
+npm ci && npm run build
+node dist/cli.cjs
+```
+
+It prints a `http://127.0.0.1:<port>` URL and opens your browser. Add `--no-open` to skip that,
+`--port <n>` to pin the port, or `--logs-dir <path>` to scan an extra VS Code or Xcode log
+directory. Claude, Codex and OpenCode logs are always discovered automatically.
+
+There is also a report mode that writes a summary to stdout, which is what you want when an
+agent is reading it rather than a person:
+
+```bash
+node dist/cli.cjs report --since 30d --harness Claude
+node dist/cli.cjs report --json | jq .
+```
+
+Session parsing runs in a forked process with its own heap, so a multi-gigabyte
+`~/.claude/projects` will not exhaust memory. The AI-powered features (Skill Finder, Learning
+Center, Context review) still need the VS Code language model and are hidden here.
+
+---
+
 ## Run as a canvas in the GitHub Copilot app
 
 The same dashboard also runs as a canvas inside the GitHub Copilot app, so you do not need VS Code to use it.

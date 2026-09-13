@@ -335,9 +335,10 @@ export async function renderShareCard(container: HTMLElement, filter: DateFilter
   document.getElementById('share-export-summary-btn')?.addEventListener('click', () => {
     void (async () => {
       try {
-        const result = await rpc<{ ok: boolean; cancelled?: boolean }>('exportSummary', { filter });
+        const result = await rpc<{ ok: boolean; cancelled?: boolean; folder?: string }>('exportSummary', { filter });
         if (result.cancelled) return;
-        showToast(result.ok ? 'Summary exported.' : 'Export cancelled.');
+        if (!result.ok) { showToast('Export cancelled.'); return; }
+        showToast(result.folder ? `Summary exported to ${result.folder}` : 'Summary exported.');
       } catch {
         showToast('Export failed.');
       }

@@ -26,6 +26,28 @@ export const MODEL_MULTIPLIERS: Record<string, number> = {
 
 export const LOC_COST_2010 = 20;
 
+/* ---- Canonical harness names ---- */
+/* The exact strings parsers write to `Session.harness`. Comparisons must use these:
+ * several call sites had drifted to display names like "Claude Code" or "Codex CLI"
+ * and silently matched nothing. */
+export const HARNESS = {
+  localAgent: 'Local Agent',
+  localAgentInsiders: 'Local Agent (Insiders)',
+  localAgentServer: 'Local Agent (Server)',
+  localAgentServerInsiders: 'Local Agent (Server Insiders)',
+  xcode: 'Xcode',
+  claude: 'Claude',
+  codex: 'Codex',
+  openCode: 'OpenCode',
+  copilotCli: 'GitHub Copilot CLI',
+  copilotApp: 'GitHub Copilot App',
+} as const;
+
+/** True for the VS Code editor harnesses, remote server variants included. */
+export function isVsCodeHarness(harness: string): boolean {
+  return harness.startsWith(HARNESS.localAgent);
+}
+
 /* ---- Per-token rates in USD per 1M tokens (May 2026 pricing) ---- */
 /* https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing */
 export interface TokenRate { input: number; cached: number; output: number; cacheWrite?: number }

@@ -17,7 +17,8 @@
     "url": "https://github.com/microsoft/AI-Engineering-Coach/issues"
   },
   "engines": {
-    "vscode": "^1.125.0"
+    "vscode": "^1.125.0",
+    "node": ">=20"
   },
   "categories": [
     "Other",
@@ -41,6 +42,9 @@
     "onView:aiEngineerCoach.welcome"
   ],
   "main": "./dist/extension.js",
+  "bin": {
+    "ai-engineer-coach": "./dist/cli.cjs"
+  },
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",

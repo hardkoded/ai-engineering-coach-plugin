@@ -5,14 +5,17 @@
 
 /* Host capability detection.
  *
- * The dashboard runs in two hosts: the VS Code extension (full local agent, can
- * call the language model) and the Copilot app canvas (read-only data view, no
- * model access). Features that need the local agent are gated on `llm`. */
+ * The dashboard runs in three hosts: the VS Code extension (full local agent, can
+ * call the language model), the Copilot app canvas, and the standalone CLI.
+ * Features that need a language model are gated on `llm`. */
 
 import { rpc } from './shared';
 
+/** Non-VS-Code hosts that embed the dashboard bundle. */
+export type DashboardHostKind = 'canvas' | 'cli';
+
 export interface HostCapabilities {
-  host: 'vscode' | 'canvas';
+  host: 'vscode' | DashboardHostKind;
   llm: boolean;
 }
 
@@ -22,7 +25,8 @@ export async function loadCapabilities(): Promise<void> {
   try {
     const result = await rpc<Partial<HostCapabilities>>('getCapabilities');
     if (result && typeof result === 'object') {
-      caps = { host: result.host === 'canvas' ? 'canvas' : 'vscode', llm: result.llm !== false };
+      const host = result.host === 'canvas' || result.host === 'cli' ? result.host : 'vscode';
+      caps = { host, llm: result.llm !== false };
     }
   } catch {
     /* keep the default full-capability profile */
@@ -37,5 +41,10 @@ export function llmAvailable(): boolean {
   return caps.llm;
 }
 
-/** Short note shown next to greyed-out, agent-dependent features. */
-export const LLM_UNAVAILABLE_NOTE = 'Open in VS Code with the local Copilot agent to use this.';
+/** Short note shown next to greyed-out, agent-dependent features. The advice
+ *  differs per host: a CLI user has no VS Code to open. */
+export function llmUnavailableNote(): string {
+  return caps.host === 'cli'
+    ? 'Not available in the CLI — this feature needs the VS Code language model.'
+    : 'Open in VS Code with the local Copilot agent to use this.';
+}

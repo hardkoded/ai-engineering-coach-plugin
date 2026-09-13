@@ -27,6 +27,7 @@ If you're a human, [`README.md`](README.md) is the better starting point.
 AI-Engineering-Coach/
 ├── src/
 │   ├── extension.ts            # VS Code activation entry point
+│   ├── cli/main.ts             # Standalone CLI: serves the dashboard, or prints a report
 │   ├── core/                   # Parsers, analyzers, the rule engine
 │   │   ├── analyzer.ts          # Top-level coordinator across analyzer-*.ts
 │   │   ├── parser.ts            # Reads session logs from disk
@@ -66,6 +67,7 @@ AI-Engineering-Coach/
 | All checks (CI gate) | `npm run check` |
 | End-to-end (Playwright) | `npm run test:e2e` |
 | Package the VSIX | `npm run package` (see [skills/package-extension.md](skills/package-extension.md)) |
+| Run the standalone CLI | `node dist/cli.cjs` (dashboard) or `node dist/cli.cjs report` |
 | Bundle-size budget | `npm run check-size` |
 
 CI runs `npm run check` (typecheck + lint + spellcheck + knip + test) plus the size check on
@@ -82,6 +84,7 @@ Available today:
 
 - [`skills/update-docs.md`](skills/update-docs.md) — author or update a Hugo doc page.
 - [`skills/package-extension.md`](skills/package-extension.md) — produce an installable `.vsix`.
+- [`skills/coach-report.md`](skills/coach-report.md) — summarize the user's sessions via the CLI.
 
 ## Rule and metric authoring
 

@@ -17,6 +17,7 @@ import {
 } from './types';
 import { toDateStr } from './helpers';
 import { AnalyzerBase } from './analyzer-base';
+import { HARNESS } from './constants';
 import {
   resolveWorkspaceRoot,
   scanConfigFiles,
@@ -100,7 +101,7 @@ export class ConfigAnalyzer extends AnalyzerBase {
     if (!rootPath) return f?.workspaceId ? { kind: 'unresolved' } : null;
 
     const isClaudeWorkspace = wsId.startsWith('claude-');
-    const harness = activity?.harness || (isClaudeWorkspace ? 'Claude Code' : 'Local Agent');
+    const harness = activity?.harness || (isClaudeWorkspace ? HARNESS.claude : HARNESS.localAgent);
     if (f?.harness && harness !== f.harness) return null;
     return { kind: 'resolved', rootPath, isClaudeWorkspace, harness };
   }

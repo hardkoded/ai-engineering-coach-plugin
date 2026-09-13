@@ -73,6 +73,19 @@ const canvasHostBuild = esbuild.build({
   external: ['vscode'],
 });
 
+// Bundle the standalone CLI (serves the webview over localhost; no vscode)
+const cliBuild = esbuild.build({
+  entryPoints: ['src/cli/main.ts'],
+  bundle: true,
+  platform: 'node',
+  target: 'es2022',
+  format: 'cjs',
+  outfile: 'dist/cli.cjs',
+  sourcemap: true,
+  external: ['vscode'],
+  banner: { js: '#!/usr/bin/env node' },
+});
+
 // Bundle the webview script
 const webviewBuild = esbuild.build({
   entryPoints: ['src/webview/app.ts'],
@@ -84,7 +97,10 @@ const webviewBuild = esbuild.build({
   sourcemap: true,
 });
 
-await Promise.all([extensionBuild, workerBuild, parseWorkerBuild, cacheWriteWorkerBuild, canvasHostBuild, webviewBuild]);
+await Promise.all([extensionBuild, workerBuild, parseWorkerBuild, cacheWriteWorkerBuild, canvasHostBuild, cliBuild, webviewBuild]);
+
+// The CLI is a `bin` entry point; npm does not set the execute bit for us on a local build.
+fs.chmodSync('dist/cli.cjs', 0o755);
 
 // Copy static webview assets
 const webviewDist = 'dist/webview';
@@ -185,6 +201,17 @@ if (isWatch) {
     sourcemap: true,
     external: ['vscode'],
   });
+  const ctxCli = await esbuild.context({
+    entryPoints: ['src/cli/main.ts'],
+    bundle: true,
+    platform: 'node',
+    target: 'es2022',
+    format: 'cjs',
+    outfile: 'dist/cli.cjs',
+    sourcemap: true,
+    external: ['vscode'],
+    banner: { js: '#!/usr/bin/env node' },
+  });
   const ctx4 = await esbuild.context({
     entryPoints: ['src/webview/app.ts'],
     bundle: true,
@@ -194,7 +221,7 @@ if (isWatch) {
     outfile: 'dist/webview/app.js',
     sourcemap: true,
   });
-  await Promise.all([ctx1.watch(), ctx2.watch(), ctx3.watch(), ctx4.watch(), ctx5.watch(), ctxCanvas.watch()]);
+  await Promise.all([ctx1.watch(), ctx2.watch(), ctx3.watch(), ctx4.watch(), ctx5.watch(), ctxCanvas.watch(), ctxCli.watch()]);
   for (const source of cssSources) {
     fs.watch(source, () => {
       try {
