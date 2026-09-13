@@ -4,18 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fs from 'fs';
+import { execFileSync } from 'child_process';
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { fileUriToPath } from '../core/helpers';
 import { Analyzer } from '../core/analyzer';
 import { ParseResult } from '../core/parser';
 import { readFileSafe } from '../core/parser-shared';
-import { Workspace } from '../core/types';
+import { DateFilter, Workspace } from '../core/types';
 import { spotlight } from '../core/spotlight';
-import { exportSummaryFiles } from '../summary-export-vscode';
 import {
-  callLlm,
-  callLlmJson,
   UNTRUSTED_DATA_GUARD,
   SCHEMA_CATALOG_PICKS,
   SCHEMA_CODE_REVIEW,
@@ -24,11 +21,12 @@ import {
   SCHEMA_QUIZ,
   SCHEMA_RESOURCES,
   SCHEMA_TRIAGE,
-} from './panel-llm';
+} from '../core/llm/schemas';
 import { getCatalogItems } from './panel-catalog';
 import { readTextWithByteLimit } from './fetch-utils';
 import { validateDateFilter } from './panel-rpc';
-import { isNumber, isOptionalString, isRecord, isString, postError, postEvent, postResponse, RequestMessage, safeJoinUnder } from './panel-shared';
+import { errorResult, isNumber, isOptionalString, isRecord, isString, RequestMessage, ResponseSink, safeJoinUnder } from './panel-shared';
+import { user, type LlmProvider } from '../core/llm/provider';
 
 type CustomPanelMethodName =
   | 'createSkill'
@@ -130,9 +128,11 @@ export class PanelRequestService {
   };
 
   constructor(
-    private readonly webview: vscode.Webview,
+    private readonly sink: ResponseSink,
     private readonly getAnalyzer: () => Analyzer | undefined,
     private readonly getParseResult: () => ParseResult | undefined,
+    private readonly llm: LlmProvider,
+    private readonly exportSummary: (analyzer: Analyzer, filter?: DateFilter) => Promise<{ ok: boolean; cancelled?: boolean; folder?: string }>,
   ) {}
 
   tryHandle(msg: RequestMessage): boolean {
@@ -140,7 +140,7 @@ export class PanelRequestService {
     const handler = this.handlers[msg.method as CustomPanelMethodName];
     if (typeof handler !== 'function') return false;
     void Promise.resolve(handler(msg)).catch((error: unknown) => {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Internal error');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Internal error'));
     });
     return true;
   }
@@ -248,7 +248,7 @@ Generate 3 ${context.difficulty} interview-style questions tailored to this deve
 
   private async handleExportSummary(msg: RequestMessage): Promise<void> {
     if (!this.analyzer) {
-      postError(this.webview, msg.id, 'Dashboard data is still loading. Try again once the dashboard is ready.');
+      this.sink.post(msg.id, errorResult('Dashboard data is still loading. Try again once the dashboard is ready.'));
       return;
     }
 
@@ -256,10 +256,10 @@ Generate 3 ${context.difficulty} interview-style questions tailored to this deve
     const filter = isRecord(params.filter) ? validateDateFilter(params.filter) : validateDateFilter(params);
 
     try {
-      const result = await exportSummaryFiles(this.analyzer, filter);
-      postResponse(this.webview, msg.id, result);
+      const result = await this.exportSummary(this.analyzer, filter);
+      this.sink.post(msg.id, result);
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Failed to export summary');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Failed to export summary'));
     }
   }
 
@@ -304,12 +304,9 @@ Generate 3 ${context.difficulty} interview-style questions tailored to this deve
     const prompt = isString(params.prompt) ? params.prompt : '';
     if (!prompt) return;
 
-    void vscode.commands.executeCommand('workbench.action.chat.open', {
-      query: prompt,
-    }).then(
-      () => postResponse(this.webview, msg.id, { ok: true }),
-      () => postError(this.webview, msg.id, 'Failed to open Copilot Chat'),
-    );
+    // This opened Copilot Chat with the prompt. Outside an IDE there is no chat window to
+    // open, so hand the prompt back and let the calling agent act on it.
+    this.sink.post(msg.id, { ok: true, prompt });
   }
 
   private async handleGenerateSkillContent(msg: RequestMessage): Promise<void> {
@@ -347,9 +344,9 @@ Starting draft:
 ${spotlight(skillDraft)}`;
 
     try {
-      const text = await callLlm([
-        vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(userPrompt),
+      const text = await this.llm.call([
+        user(systemPrompt),
+        user(userPrompt),
       ]);
 
       let content = text.trim();
@@ -358,9 +355,9 @@ ${spotlight(skillDraft)}`;
       }
 
       const slug = label.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/-+/g, '-').replaceAll(/^-|-$/g, '');
-      postResponse(this.webview, msg.id, { content, filename: `${slug}/SKILL.md` });
+      this.sink.post(msg.id, { content, filename: `${slug}/SKILL.md` });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Generation failed');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Generation failed'));
     }
   }
 
@@ -370,15 +367,15 @@ ${spotlight(skillDraft)}`;
     const userPrompt = this.buildQuizUserPrompt(context);
 
     try {
-      const response = await callLlmJson<{ items: QuizQuestion[] }>([
-        vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(userPrompt),
+      const response = await this.llm.callJson<{ items: QuizQuestion[] }>([
+        user(systemPrompt),
+        user(userPrompt),
       ], SCHEMA_QUIZ);
 
       const validated = this.normalizeQuizQuestions(response, context.difficulty);
-      postResponse(this.webview, msg.id, { questions: validated });
+      this.sink.post(msg.id, { questions: validated });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Quiz generation failed. Please try again.');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Quiz generation failed. Please try again.'));
     }
   }
 
@@ -436,7 +433,7 @@ Difficulty: ${difficulty}
 Generate 3 code comparison rounds for this developer's ecosystem. Mix the categories.`;
 
     try {
-      const response = await callLlmJson<{ items: Array<{
+      const response = await this.llm.callJson<{ items: Array<{
         snippetA: string;
         snippetB: string;
         betterSnippet: string;
@@ -446,8 +443,8 @@ Generate 3 code comparison rounds for this developer's ecosystem. Mix the catego
         difficulty: string;
         language: string;
       }> }>([
-        vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(userPrompt),
+        user(systemPrompt),
+        user(userPrompt),
       ], SCHEMA_CODE_REVIEW);
 
       const rounds = Array.isArray(response) ? response as unknown as typeof response['items'] : response.items ?? [];
@@ -471,9 +468,9 @@ Generate 3 code comparison rounds for this developer's ecosystem. Mix the catego
           language: String(round.language || languages[0] || 'code'),
         }));
 
-      postResponse(this.webview, msg.id, { rounds: validated });
+      this.sink.post(msg.id, { rounds: validated });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Code comparison generation failed. Please try again.');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Code comparison generation failed. Please try again.'));
     }
   }
 
@@ -508,8 +505,8 @@ Respond with a JSON object: {"items":[{"fact":"...", "project":"...", "category"
 ${UNTRUSTED_DATA_GUARD}`;
 
     try {
-      const response = await callLlmJson<{ items: Array<{ fact: string; project: string; category: string }> }>(
-        [vscode.LanguageModelChatMessage.User(systemPrompt)],
+      const response = await this.llm.callJson<{ items: Array<{ fact: string; project: string; category: string }> }>(
+        [user(systemPrompt)],
         SCHEMA_DID_YOU_KNOW,
       );
       const facts = Array.isArray(response) ? response as unknown as typeof response['items'] : response.items ?? [];
@@ -522,9 +519,9 @@ ${UNTRUSTED_DATA_GUARD}`;
           category: (['performance', 'api', 'pitfall', 'config', 'debug'].includes(fact.category) ? fact.category : 'api'),
         }));
 
-      postResponse(this.webview, msg.id, { facts: validated });
+      this.sink.post(msg.id, { facts: validated });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Did-you-know generation failed');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Did-you-know generation failed'));
     }
   }
 
@@ -563,8 +560,8 @@ Respond with a JSON object: {"items":[{"title":"...","url":"https://...","type":
 ${UNTRUSTED_DATA_GUARD}`;
 
     try {
-      const response = await callLlmJson<{ items: Array<{ title: string; url: string; type: string; reason: string }> }>(
-        [vscode.LanguageModelChatMessage.User(systemPrompt)],
+      const response = await this.llm.callJson<{ items: Array<{ title: string; url: string; type: string; reason: string }> }>(
+        [user(systemPrompt)],
         SCHEMA_RESOURCES,
       );
       const resources = Array.isArray(response) ? response as unknown as typeof response['items'] : response.items ?? [];
@@ -573,15 +570,15 @@ ${UNTRUSTED_DATA_GUARD}`;
         .slice(0, 6)
         .map(resource => ({ title: resource.title, url: resource.url, type: String(resource.type || 'Resource'), reason: String(resource.reason || '') }));
 
-      postResponse(this.webview, msg.id, { resources: validated });
+      this.sink.post(msg.id, { resources: validated });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Resource generation failed', { resources: [] });
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Resource generation failed', { resources: [] }));
     }
   }
 
   private handleGetWorkspaceDeps(msg: RequestMessage): void {
     if (!this.parseResult) {
-      postResponse(this.webview, msg.id, { deps: [] });
+      this.sink.post(msg.id, { deps: [] });
       return;
     }
 
@@ -610,7 +607,7 @@ ${UNTRUSTED_DATA_GUARD}`;
       }
     }
 
-    postResponse(this.webview, msg.id, { deps });
+    this.sink.post(msg.id, { deps });
   }
 
   private async handleInstallSkill(msg: RequestMessage): Promise<void> {
@@ -618,28 +615,27 @@ ${UNTRUSTED_DATA_GUARD}`;
     const filename = isString(params.filename) ? params.filename : '';
     const content = isString(params.content) ? params.content : '';
     if (!filename || !content) {
-      postError(this.webview, msg.id, 'Missing filename or content');
+      this.sink.post(msg.id, errorResult('Missing filename or content'));
       return;
     }
 
     const homeDir = process.env.HOME || process.env.USERPROFILE;
     if (!homeDir) {
-      postError(this.webview, msg.id, 'Cannot determine home directory');
+      this.sink.post(msg.id, errorResult('Cannot determine home directory'));
       return;
     }
     const targetPath = safeJoinUnder(path.join(homeDir, '.agents', 'skills'), filename.split('/'), { allowedExts: ['.md'] });
     if (!targetPath) {
-      postError(this.webview, msg.id, 'Invalid filename');
+      this.sink.post(msg.id, errorResult('Invalid filename'));
       return;
     }
 
     try {
-      const targetUri = vscode.Uri.file(targetPath);
-      await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(targetPath)));
-      await vscode.workspace.fs.writeFile(targetUri, Buffer.from(content, 'utf8'));
-      postResponse(this.webview, msg.id, { ok: true, path: targetUri.fsPath });
+      await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.promises.writeFile(targetPath, content, 'utf8');
+      this.sink.post(msg.id, { ok: true, path: targetPath });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Install failed');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Install failed'));
     }
   }
 
@@ -649,7 +645,7 @@ ${UNTRUSTED_DATA_GUARD}`;
     const kind = isString(params.kind) ? params.kind : 'skill';
     const title = isString(params.title) ? params.title : '';
     if (!catalogPath || catalogPath.includes('..') || catalogPath.startsWith('/') || catalogPath.startsWith('\\')) {
-      postError(this.webview, msg.id, 'Invalid catalog path');
+      this.sink.post(msg.id, errorResult('Invalid catalog path'));
       return;
     }
 
@@ -657,7 +653,7 @@ ${UNTRUSTED_DATA_GUARD}`;
       const rawUrl = `https://raw.githubusercontent.com/github/awesome-copilot/main/${catalogPath}`;
       const parsedUrl = new URL(rawUrl);
       if (parsedUrl.hostname !== 'raw.githubusercontent.com' || !parsedUrl.pathname.startsWith('/github/awesome-copilot/')) {
-        postError(this.webview, msg.id, 'Invalid catalog URL');
+        this.sink.post(msg.id, errorResult('Invalid catalog URL'));
         return;
       }
       const response = await fetch(parsedUrl.toString(), { redirect: 'error' });
@@ -673,12 +669,11 @@ ${UNTRUSTED_DATA_GUARD}`;
       const targetPath = safeJoinUnder(path.join(homeDir, '.agents', subDir), [slug, filename], { allowedExts: ['.md'] });
       if (!targetPath) throw new Error('Invalid path');
 
-      const targetUri = vscode.Uri.file(targetPath);
-      await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(targetPath)));
-      await vscode.workspace.fs.writeFile(targetUri, Buffer.from(content, 'utf8'));
-      postResponse(this.webview, msg.id, { content, filename: `${slug}/${filename}` });
+      await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.promises.writeFile(targetPath, content, 'utf8');
+      this.sink.post(msg.id, { content, filename: `${slug}/${filename}` });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Install failed');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Install failed'));
     }
   }
 
@@ -736,9 +731,9 @@ ${UNTRUSTED_DATA_GUARD}`;
 Here are the top ${clusterSummaries.length} groups of similar prompts this developer sends repeatedly:\n\n${JSON.stringify(clusterSummaries, null, 2)}`;
 
     try {
-      const response = await callLlmJson<{ items: Array<{ id: string; verdict: string; reason: string; suggestedSkillName: string | null }> }>([
-        vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(userPrompt),
+      const response = await this.llm.callJson<{ items: Array<{ id: string; verdict: string; reason: string; suggestedSkillName: string | null }> }>([
+        user(systemPrompt),
+        user(userPrompt),
       ], SCHEMA_TRIAGE);
       const triaged = Array.isArray(response) ? response as unknown as typeof response['items'] : response.items ?? [];
       const validVerdicts = new Set(['strong', 'maybe', 'skip']);
@@ -750,9 +745,9 @@ Here are the top ${clusterSummaries.length} groups of similar prompts this devel
         suggestedSkillName: item.suggestedSkillName ? String(item.suggestedSkillName) : null,
       }));
 
-      postResponse(this.webview, msg.id, { triaged: result });
+      this.sink.post(msg.id, { triaged: result });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'AI triage failed');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'AI triage failed'));
     }
   }
 
@@ -763,9 +758,9 @@ Here are the top ${clusterSummaries.length} groups of similar prompts this devel
         relevanceScore: 0,
         matchReasons: [],
       }));
-      postResponse(this.webview, msg.id, { items, totalScanned: items.length });
+      this.sink.post(msg.id, { items, totalScanned: items.length });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'Failed to fetch catalog');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'Failed to fetch catalog'));
     }
   }
 
@@ -809,7 +804,7 @@ Your job:
 2. Consider the specific workspace being analyzed: ${workspace ? `"${workspace}"` : 'all workspaces'}.
 3. From the FULL catalog, find items that DIRECTLY help with the developer's actual repeated tasks or tech stack.
 4. REJECT items that don't match. A .NET skill is useless for someone building VS Code extensions. A React skill is useless for someone writing Python CLIs.
-5. For each pick, write a concrete reason referencing the developer's ACTUAL workflow patterns. Example: "You repeatedly package VS Code extensions (seen 47 times) — this skill automates VSIX packaging."
+5. For each pick, write a concrete reason referencing the developer's ACTUAL workflow patterns. Example: "You repeatedly write database migrations by hand (seen 47 times) — this skill generates them."
 
 Respond with a JSON object: {"items":[{"id":"...","reason":"specific sentence referencing their actual workflow patterns"}]}
 Max 5 items. If fewer genuinely match, return fewer. If NOTHING matches well, return empty items array. Do NOT pad with generic picks.
@@ -830,9 +825,9 @@ Full catalog (${candidates.length} items):
 ${JSON.stringify(candidates)}`;
 
     try {
-      const response = await callLlmJson<{ items: Array<{ id: string; reason: string }> }>([
-        vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(userPrompt),
+      const response = await this.llm.callJson<{ items: Array<{ id: string; reason: string }> }>([
+        user(systemPrompt),
+        user(userPrompt),
       ], SCHEMA_CATALOG_PICKS);
       const picks = Array.isArray(response) ? response as unknown as typeof response['items'] : response.items ?? [];
       const enriched = picks.map(pick => {
@@ -851,15 +846,15 @@ ${JSON.stringify(candidates)}`;
         };
       }).filter(item => item.title);
 
-      postResponse(this.webview, msg.id, { items: enriched });
+      this.sink.post(msg.id, { items: enriched });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'AI triage failed');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'AI triage failed'));
     }
   }
 
   private async handleReviewContextFiles(msg: RequestMessage): Promise<void> {
     if (!this.analyzer) {
-      postError(this.webview, msg.id, 'Analyzer not ready.');
+      this.sink.post(msg.id, errorResult('Analyzer not ready.'));
       return;
     }
 
@@ -868,14 +863,14 @@ ${JSON.stringify(candidates)}`;
       const maxCount = typeof params.count === 'number' ? Math.min(Math.max(1, params.count), 20) : 5;
       const workspaceIds = Array.isArray(params.workspaceIds) ? (params.workspaceIds as string[]).slice(0, maxCount) : [];
       if (workspaceIds.length === 0) {
-        postError(this.webview, msg.id, 'No workspaces specified.');
+        this.sink.post(msg.id, errorResult('No workspaces specified.'));
         return;
       }
 
       const payloads = this.analyzer.getContextReviewPayload(workspaceIds);
-      postEvent(this.webview, 'reviewProgress', { phase: 'start', workspaces: payloads.map(payload => ({ id: payload.workspaceId, name: payload.workspaceName })) });
+      this.sink.event('reviewProgress', { phase: 'start', workspaces: payloads.map(payload => ({ id: payload.workspaceId, name: payload.workspaceName })) });
       if (payloads.length === 0) {
-        postError(this.webview, msg.id, 'Could not resolve workspace roots.');
+        this.sink.post(msg.id, errorResult('Could not resolve workspace roots.'));
         return;
       }
 
@@ -944,9 +939,9 @@ ${contextSection}`;
       }).join('\n\n');
 
       const userPrompt = `Review these ${payloads.length} workspace(s):\n${workspaceData}`;
-      const response = await callLlmJson<{ items: Array<Record<string, unknown>> }>([
-        vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(userPrompt),
+      const response = await this.llm.callJson<{ items: Array<Record<string, unknown>> }>([
+        user(systemPrompt),
+        user(userPrompt),
       ], SCHEMA_CONTEXT_REVIEW);
       const rawItems = Array.isArray(response) ? response as unknown as typeof response['items'] : response.items ?? [];
       const validCategories = new Set(categories);
@@ -988,9 +983,9 @@ ${contextSection}`;
         };
       });
 
-      postResponse(this.webview, msg.id, { reviews: results });
+      this.sink.post(msg.id, { reviews: results });
     } catch (error: unknown) {
-      postError(this.webview, msg.id, error instanceof Error ? error.message : 'AI review failed');
+      this.sink.post(msg.id, errorResult(error instanceof Error ? error.message : 'AI review failed'));
     }
   }
 
@@ -1168,8 +1163,9 @@ ${contextSection}`;
 
   private async getGitHubAccessToken(requestAuth: boolean): Promise<string | undefined> {
     try {
-      const session = await vscode.authentication.getSession('github', ['repo', 'read:org'], { createIfNone: requestAuth });
-      return session?.accessToken;
+      if (!requestAuth) return process.env.GITHUB_TOKEN || undefined;
+      const token = execFileSync('gh', ['auth', 'token'], { encoding: 'utf8', timeout: 15_000 }).trim();
+      return token || undefined;
     } catch {
       return undefined;
     }
@@ -1242,7 +1238,7 @@ ${contextSection}`;
 
   private handleGetSdlcToolAnalysis(msg: RequestMessage): void {
     if (!this.parseResult) {
-      postResponse(this.webview, msg.id, { mcpServers: [], toolCounts: {} });
+      this.sink.post(msg.id, { mcpServers: [], toolCounts: {} });
       return;
     }
 
@@ -1312,7 +1308,7 @@ ${contextSection}`;
       };
     }).sort((a, b) => b.toolCalls - a.toolCalls);
 
-    postResponse(this.webview, msg.id, { mcpServers });
+    this.sink.post(msg.id, { mcpServers });
   }
 
   private handleGetSdlcRepoScan(msg: RequestMessage): void {
@@ -1328,7 +1324,7 @@ ${contextSection}`;
 
     const sortedRoots = roots.sort((a, b) => (wsActivity.get(b.workspaceId) || 0) - (wsActivity.get(a.workspaceId) || 0));
     const repos = sortedRoots.map(workspace => this.scanWorkspaceRepo(workspace));
-    postResponse(this.webview, msg.id, { repos });
+    this.sink.post(msg.id, { repos });
   }
 
   private async handleGetSdlcGitHubData(msg: RequestMessage): Promise<void> {
@@ -1336,18 +1332,18 @@ ${contextSection}`;
     const owner = isString(params.owner) ? params.owner : '';
     const repo = isString(params.repo) ? params.repo : '';
     if (!owner || !repo) {
-      postError(this.webview, msg.id, 'Missing owner/repo');
+      this.sink.post(msg.id, errorResult('Missing owner/repo'));
       return;
     }
     if (owner !== '_auth_' && (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(repo))) {
-      postError(this.webview, msg.id, 'Invalid owner/repo');
+      this.sink.post(msg.id, errorResult('Invalid owner/repo'));
       return;
     }
 
     const isAuthProbe = owner === '_auth_';
     const token = await this.getGitHubAccessToken(isAuthProbe && params.requestAuth === true);
     if (!token) {
-      postResponse(this.webview, msg.id, {
+      this.sink.post(msg.id, {
         authRequired: true,
         error: 'GitHub authentication required. Sign in to see PR and agent data.',
       });
@@ -1355,7 +1351,7 @@ ${contextSection}`;
     }
 
     if (isAuthProbe) {
-      postResponse(this.webview, msg.id, { authRequired: false });
+      this.sink.post(msg.id, { authRequired: false });
       return;
     }
 
@@ -1382,6 +1378,6 @@ ${contextSection}`;
       collaborators: await this.fetchCollaboratorStats(owner, repo, headers),
     };
 
-    postResponse(this.webview, msg.id, results);
+    this.sink.post(msg.id, results);
   }
 }

@@ -3,7 +3,7 @@
 ## How to file issues and get help
 
 This project uses GitHub Issues to track bugs and feature requests. Please search the
-[existing issues](https://github.com/microsoft/ai-engineer-coach/issues) before filing new issues to avoid duplicates.
+[existing issues](https://github.com/hardkoded/ai-engineering-coach-plugin/issues) before filing new issues to avoid duplicates.
 For new issues, file your bug or feature request as a new issue.
 
 For help and questions about using this project, please open a GitHub issue.

@@ -1,6 +1,6 @@
 ---
 name: ai-engineering-coach
-description: Analyze the user's own local AI coding sessions and report how they work with AI agents - practice scores, anti-patterns, generated code volume, context health, and activity. Reads logs that Claude Code, Codex, OpenCode, GitHub Copilot, and Copilot CLI already write on this machine. Use when the user asks how they are using AI, to review their coding sessions, what their anti-patterns are, whether they use Claude Code well, or wants their AI usage stats, practice scores, or a coaching report.
+description: The agent-plugin edition of Microsoft's AI-Engineering-Coach. Analyze the user's own local AI coding sessions and report how they work with AI agents - practice scores, anti-patterns, generated code volume, context health, and activity. Reads logs that Claude Code, Codex, OpenCode, GitHub Copilot, and Copilot CLI already write on this machine. Use when the user asks how they are using AI, to review their coding sessions, what their anti-patterns are, whether they use Claude Code well, or wants their AI usage stats, practice scores, or a coaching report.
 license: MIT
 compatibility: Requires Node.js 20+. Reads local session logs only; makes no network requests.
 metadata:
@@ -9,6 +9,7 @@ metadata:
 
 # AI Engineering Coach
 
+The agent-plugin edition of [Microsoft's AI-Engineering-Coach](https://github.com/microsoft/AI-Engineering-Coach).
 Reports on how the user actually works with AI coding agents, from the session logs already
 on their machine. Nothing is uploaded; every number is computed locally.
 

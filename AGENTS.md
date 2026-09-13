@@ -1,13 +1,13 @@
 ---
 name: AI Engineer Coach
-description: VS Code extension that analyzes local AI session logs and surfaces insights in a webview dashboard. Read-only, zero telemetry, all analysis runs on the user's machine.
+description: Agent plugin that analyzes local AI session logs and surfaces insights in a dashboard and a CLI report. Read-only, zero telemetry, all analysis runs on the user's machine.
 ---
 
 # AGENTS.md
 
-You are an experienced TypeScript engineer working on the **AI Engineer Coach** VS Code
-extension. Your job is to keep analysis correct, the extension host responsive, and user data
-private — this codebase has zero telemetry and never modifies user session logs.
+You are an experienced TypeScript engineer working on the **AI Engineering Coach** agent
+plugin. Your job is to keep analysis correct, the CLI responsive, and user data private —
+this codebase has zero telemetry and never modifies user session logs.
 
 If you're a human, [`README.md`](README.md) is the better starting point.
 
@@ -67,7 +67,6 @@ AI-Engineering-Coach/
 | Unit tests (vitest) | `npm test` |
 | All checks (CI gate) | `npm run check` |
 | End-to-end (Playwright) | `npm run test:e2e` |
-| Package the VSIX | `npm run package` (see [skills/package-extension/](skills/package-extension/)) |
 | Run the standalone CLI | `node dist/cli.cjs` (dashboard) or `node dist/cli.cjs report` |
 | Bundle-size budget | `npm run check-size` |
 
@@ -87,7 +86,6 @@ Available today:
 
 - [`skills/ai-engineering-coach/`](skills/ai-engineering-coach/) — report on the user's own sessions.
 - [`skills/update-docs/`](skills/update-docs/) — author or update a Hugo doc page.
-- [`skills/package-extension/`](skills/package-extension/) — produce an installable `.vsix`.
 
 ## Rule and metric authoring
 
@@ -104,7 +102,7 @@ Rules ship with inline `# Tests` blocks that run as part of `npm test`.
 
 ## Workers
 
-Heavy lifting happens off the extension host thread:
+Heavy lifting happens off the main thread:
 
 - [`src/core/parse-worker.ts`](src/core/parse-worker.ts) — `logsDirs` → `progress` + `result`/`error`.
 - [`src/core/warm-up-worker.ts`](src/core/warm-up-worker.ts) — `sessions` → `antiPatterns` + `configHealth`.
@@ -149,7 +147,7 @@ point at the source markdown so they resolve on GitHub too.
 ## Code style
 
 Strict TypeScript, no `any` in new code, prefer named exports, keep heavy work off the
-extension-host thread.
+main thread.
 
 ```ts
 // Good: typed, narrow, awaitable, off-thread.
@@ -160,7 +158,7 @@ export async function parseSessions(
   return runWorker('parse-worker', { logsDirs }, onProgress);
 }
 
-// Bad: untyped, blocks the extension host, swallows errors.
+// Bad: untyped, blocks the main thread, swallows errors.
 export function parseSessions(logsDirs) {
   try { return require('./parser').parseSync(logsDirs); } catch { return null; }
 }
@@ -200,7 +198,7 @@ body and an optional `# Tests` block. See [`docs/AUTHORING_RULES.md`](docs/AUTHO
 ⚠️ **Ask first:**
 
 - Adding a runtime dependency (bundle-size budget enforced by `npm run check-size`).
-- Introducing a network call from the extension host or a worker.
+- Introducing a network call from the CLI or a worker.
 - Changing the rule trust flow (`pending → review → approve → reload`) or the DSL surface.
 - Renaming public commands, configuration keys, or extension IDs (breaks user settings).
 - Bumping `engines.vscode` or the Node version.
@@ -209,7 +207,7 @@ body and an optional `# Tests` block. See [`docs/AUTHORING_RULES.md`](docs/AUTHO
 
 - Commit secrets, tokens, `.env` files, or anything matching `local/`, `marketing/`,
   `PROPOSED_FIXES.md`, or other `.gitignore` entries.
-- Edit generated artifacts: `dist/`, `docs/public/`, `*.vsix`, `node_modules/`,
+- Edit generated artifacts: `dist/`, `docs/public/`, `node_modules/`,
   `test-results/`, `.vscode-test/`.
 - Modify files under the user's session-log directories at runtime — this extension is
   strictly read-only with respect to user data.

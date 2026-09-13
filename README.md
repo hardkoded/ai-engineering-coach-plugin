@@ -1,14 +1,16 @@
-<h1 align="center">AI Engineering Coach</h1>
+<h1 align="center">AI Engineering Coach — Agent Plugin</h1>
 
 <p align="center">
 <strong>better agentic engineering.</strong><br>
-An agent plugin that analyzes how you actually work with AI coding agents — any tool, one report.
+The agent-plugin edition of <a href="https://github.com/microsoft/AI-Engineering-Coach">Microsoft's AI-Engineering-Coach</a>.<br>
+Analyzes how you actually work with AI coding agents — every tool you use, one report.
 </p>
 
 <p align="center">
 <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <a href="https://agent-plugins.org/"><img alt="Agent Plugins 1.1.0" src="https://img.shields.io/badge/Agent%20Plugins-1.1.0-6e40c9"></a>
 <a href="https://agentskills.io/specification"><img alt="Agent Skills" src="https://img.shields.io/badge/Agent%20Skills-compatible-10b981"></a>
+<img alt="Requires Claude Code" src="https://img.shields.io/badge/requires-Claude%20Code-d97706">
 </p>
 
 ---
@@ -26,33 +28,59 @@ It reads **Claude Code**, **Codex**, **OpenCode**, **GitHub Copilot** (VS Code, 
 desktop app), and **Copilot for Xcode**.
 
 > This is a fork of [microsoft/AI-Engineering-Coach](https://github.com/microsoft/AI-Engineering-Coach),
-> repackaged as a portable agent plugin and given a standalone CLI so it runs without VS Code.
-> See [Relationship to upstream](#relationship-to-upstream).
+> repackaged as an agent plugin. The original is a VS Code extension; this one is not, and
+> its AI-powered features run through **Claude Code**. See
+> [Relationship to upstream](#relationship-to-upstream).
 
 ---
 
-## Install
+## Install in Claude Code
 
-The repo *is* the plugin: [`plugin.json`](plugin.json) at the root, skills under
-[`skills/`](skills/), per the [Agent Plugins](https://agent-plugins.org/) standard.
+Add the marketplace, then install the plugin:
+
+```
+/plugin marketplace add hardkoded/ai-engineering-coach-plugin
+/plugin install ai-engineering-coach@ai-engineering-coach-plugin
+```
+
+Then build it once, so the coach has something to run:
+
+```bash
+cd ~/.claude/plugins/marketplaces/ai-engineering-coach-plugin
+npm ci && npm run build
+```
+
+The skill also builds itself on first use if you skip that step — the first report just takes
+a few minutes longer.
+
+That is it. Ask *"how am I using AI?"* and the skill activates.
+
+### Manual install
+
+If you would rather not use the plugin system, clone the repo and link the skill:
 
 ```bash
 git clone https://github.com/hardkoded/ai-engineering-coach-plugin.git
 cd ai-engineering-coach-plugin
 npm ci && npm run build
-```
-
-Then point your agent at it. For **Claude Code**, link the skills into your personal skills
-directory so they work from any project:
-
-```bash
 ln -s "$PWD/skills/ai-engineering-coach" ~/.claude/skills/ai-engineering-coach
 ```
 
-Any client that implements the Agent Plugins standard can instead load the directory as a
-plugin and discover the same skills through `plugin.json`. Clients that read skills from a
-checkout will also find them in [`.claude/skills/`](.claude/skills/) and
+Link the skill *directory*, not the files inside it. The launcher finds the plugin root from
+its own physical location, so a symlinked directory works and a copied script does not.
+
+### Other agents
+
+The repo is also an [Agent Plugins](https://agent-plugins.org/) package — [`plugin.json`](plugin.json)
+at the root, [Agent Skills](https://agentskills.io/specification) under [`skills/`](skills/) —
+so any client implementing that standard can load it and discover the same skills. Clients
+that read skills from a checkout will find them in [`.claude/skills/`](.claude/skills/) and
 [`.github/skills/`](.github/skills/), which symlink to the same files.
+
+**The generative features need Claude.** Skill Finder, the Learning Center and the AI context
+review call the `claude` binary you have already signed in to — there is no API key to set up.
+Without `claude` on your `PATH` those features hide themselves; everything computed from your
+logs still works.
 
 ---
 
@@ -123,7 +151,6 @@ from terminal agents are re-parsed each time rather than cached.
 | Skill | What it does |
 |---|---|
 | [`ai-engineering-coach`](skills/ai-engineering-coach/SKILL.md) | Reports on your sessions — scores, anti-patterns, code output, activity |
-| [`package-extension`](skills/package-extension/SKILL.md) | Builds the VS Code extension into an installable `.vsix` |
 | [`update-docs`](skills/update-docs/SKILL.md) | Adds or edits a page in the Hugo docs site |
 
 `npm test` validates `plugin.json` and every `SKILL.md` against both specs
@@ -132,26 +159,6 @@ than failing silently in someone's agent.
 
 ---
 
-## Also runs as a VS Code extension
-
-The original packaging still works, and it is the only way to get the AI-assisted features
-(Skill Finder, Learning Center, and the AI context review), which need the VS Code language
-model API.
-
-```bash
-npm ci && npm run package
-code --install-extension ai-engineer-coach-*.vsix
-```
-
-Then run **AI Engineer Coach: Open Dashboard** from the command palette. On Windows, use
-`code --install-extension (Get-ChildItem . -Filter 'ai-engineer-coach-*.vsix' | Select-Object -First 1).FullName`,
-or install from the palette with **Install from VSIX**.
-
-The dashboard also runs as a canvas inside the GitHub Copilot app — open this repo as a
-project there and pick the **AI Engineer Coach** canvas. Both hosts share the webview bundle
-and the analysis code with the CLI.
-
----
 ## Pages
 
 ### Observe
@@ -209,8 +216,8 @@ image requests.
 | **Agentic SDLC**    | How you use AI across the full software-development lifecycle                    |
 | **Share**           | Generate a shareable stat card and export Markdown/JSON summaries               |
 
-**Skill Finder**, **Learning Center**, and the AI review on **Context Health** need the VS Code
-language model and are hidden in the CLI and the Copilot canvas. **Rule Playground** and
+**Skill Finder**, **Learning Center**, and the AI review on **Context Health** call Claude, and
+hide themselves when the `claude` binary is not on your `PATH`. **Rule Playground** and
 **Data Explorer** have no sidebar entry yet — reach them from the Anti-Patterns page.
 
 ---
@@ -220,9 +227,9 @@ language model and are hidden in the CLI and the Copilot canvas. **Rule Playgrou
 - **Read-only** — never modifies your session files
 - **Local analysis** — all parsing and analytics run on your machine
 - **No telemetry** — nothing phones home, and the core analysis paths make no network calls
-- **Optional AI features** — Skill Finder, Learning Center and the context review call the
-  VS Code language model, and only when you explicitly invoke them. They are unavailable in
-  the CLI, where the dashboard reads your logs and nothing else.
+- **Optional AI features** — Skill Finder, Learning Center and the context review shell out to
+  your own `claude` binary, and only when you explicitly invoke them. Everything else runs with
+  no model at all.
 
 ---
 
@@ -232,8 +239,10 @@ Forked from [microsoft/AI-Engineering-Coach](https://github.com/microsoft/AI-Eng
 an open-source community effort by Microsoft employees. The analysis engine, rules, and
 dashboard are theirs. This fork adds:
 
-- A standalone CLI, so the dashboard and a stdout report run without VS Code or the Copilot app.
+- A standalone CLI, so the dashboard and a stdout report run from a terminal.
 - Agent Plugins and Agent Skills packaging, so any compatible agent can use it.
+- The generative features rewired from the VS Code language model to the Claude CLI. This fork
+  drops the VS Code extension entirely; upstream is where to go if you want that.
 - Fixes for analyzing terminal agents: Claude Code workspaces were dropped from Context Health
   entirely, and eleven IDE-only rules scored terminal sessions against fields those tools
   never record.

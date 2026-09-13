@@ -1,0 +1,15 @@
+{
+  "name": "ai-engineering-coach-plugin",
+  "description": "Analyze how you actually work with AI coding agents. Reads the session logs Claude Code, Codex, OpenCode and GitHub Copilot already write on your machine, and reports practice scores, anti-patterns, generated code volume and context health.",
+  "owner": {
+    "name": "hardkoded",
+    "url": "https://github.com/hardkoded"
+  },
+  "plugins": [
+    {
+      "name": "ai-engineering-coach",
+      "source": "./",
+      "description": "The agent-plugin edition of Microsoft's AI-Engineering-Coach. Reports on your own AI coding sessions: practice scores, anti-patterns, code output, and context health. All analysis runs locally."
+    }
+  ]
+}

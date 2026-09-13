@@ -12,7 +12,7 @@ AI Engineer Coach reads logs from multiple AI coding tools:
 
 | Harness | Source |
 |---|---|
-| **Local Agent / Local Agent (Insiders)** | Chat panel logs in the extension host directory (VS Code / VS Code Insiders) |
+| **Local Agent / Local Agent (Insiders)** | GitHub Copilot chat panel logs written by VS Code / VS Code Insiders |
 | **Local Agent (Server) / Local Agent (Server Insiders)** | Remote host chat panel logs under `~/.vscode-server/data/User/workspaceStorage/` or `~/.vscode-server-insiders/data/User/workspaceStorage/` |
 | **GitHub Copilot for Xcode** | Copilot Chat conversations from Apple's Xcode IDE |
 | **Claude** | Session files from Anthropic's CLI-based coding assistant |
@@ -22,7 +22,7 @@ AI Engineer Coach reads logs from multiple AI coding tools:
 
 ## How It Works
 
-AI Engineer Coach runs as a VS Code extension. On activation, it scans your local log directories for supported tools, parses every session into structured data, and renders an interactive webview panel with dashboards, charts, and actionable findings. The analysis pipeline is organized around three areas: **Observe**, **Measure**, and **Improve**, plus a **Level Up** section that turns your data into a progression system.
+AI Engineering Coach runs as an agent plugin and a local CLI. It scans your log directories for supported tools, parses every session into structured data, and renders either a stdout summary or an interactive dashboard served on localhost, with charts and actionable findings. The analysis pipeline is organized around three areas: **Observe**, **Measure**, and **Improve**, plus a **Level Up** section that turns your data into a progression system.
 
 ## Editable Rule Engine
 

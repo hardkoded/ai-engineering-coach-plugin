@@ -41,6 +41,18 @@ import {
 import { compileNaturalLanguageRule } from '../core/rule-compiler';
 import type { SessionRequest, Session } from '../core/types';
 import { errorResult, isString, isNumber, isOptionalString, isRecord } from './panel-shared';
+import { assistant, user, type LlmProvider } from '../core/llm/provider';
+import { UNTRUSTED_DATA_GUARD } from '../core/llm/schemas';
+
+/* The handler table is a plain map with a fixed signature, so the provider lives here
+ * rather than being threaded through every handler that does not need it. */
+let llmProvider: LlmProvider | null = null;
+
+export function setLlmProvider(provider: LlmProvider | null): void {
+  llmProvider = provider;
+}
+
+const NO_LLM = 'No language model available. Install the Claude Code CLI and make sure `claude` is on your PATH.';
 import { DSL_CHEATSHEET } from './dsl-cheatsheet';
 import { getRequestLoc } from '../core/analyzer-base';
 import type { EditLocIndex } from '../core/edit-loc-diff';
@@ -71,9 +83,7 @@ function classifyRuleWritePath(pathMod: typeof import('path'), filePath: string)
   const personalDir = getPersonalRulesDir();
   let workspaceRoot: string | undefined;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const vscode = require('vscode') as typeof import('vscode');
-    workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    workspaceRoot = process.cwd();
   } catch { /* test context */ }
   const allowedDirs = [personalDir, ...(workspaceRoot ? [getProjectRulesDir(workspaceRoot)] : [])];
   const resolved = pathMod.resolve(filePath);
@@ -790,9 +800,7 @@ const rpcHandlers: TypedRpcHandlers = {
     }));
     let workspaceRoot: string | undefined;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const vscode = require('vscode') as typeof import('vscode');
-      workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      workspaceRoot = process.cwd();
     } catch { /* running in test context */ }
     const layers = getRuleLayerInfo(workspaceRoot);
 
@@ -893,15 +901,10 @@ const rpcHandlers: TypedRpcHandlers = {
     return { ok: !!result };
   },
 
-  reviewLocalRules: async () => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const vscode = require('vscode') as typeof import('vscode');
-      await vscode.commands.executeCommand('aiEngineerCoach.reviewLocalRules');
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
+  reviewLocalRules: () => {
+    // The trust prompt was an IDE command. `rule-loader` treats personal rules as trusted
+    // outside VS Code, so there is nothing to review here.
+    return { ok: true };
   },
 
   testRuleLive: (a, _p, params) => {
@@ -950,9 +953,7 @@ const rpcHandlers: TypedRpcHandlers = {
 
       const sessionSummary = buildOccurrenceSessionSummary(session, parseResult.editLocIndex);
 
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const vscode = require('vscode') as typeof import('vscode');
-      const { callLlm, UNTRUSTED_DATA_GUARD } = await import('./panel-llm');
+      if (!llmProvider) return { ok: false, explanation: '', error: NO_LLM };
 
       const systemPrompt = `You are an expert explaining why a specific coding session triggered an AI Engineer Coach detection rule.
 You will receive the rule (in DSL form) and a summary of the session. Explain in 2-4 short sentences:
@@ -975,12 +976,7 @@ ${JSON.stringify(sessionSummary, null, 2)}
 
 Explain why this session triggered the rule.`;
 
-      const messages = [
-        vscode.LanguageModelChatMessage.User(systemPrompt),
-        vscode.LanguageModelChatMessage.User(userPrompt),
-      ];
-
-      const explanation = await callLlm(messages);
+      const explanation = await llmProvider.call([user(systemPrompt), user(userPrompt)]);
       return { ok: true, explanation: explanation.trim() };
     } catch (err: unknown) {
       return { ok: false, explanation: '', error: err instanceof Error ? err.message : String(err) };
@@ -1048,31 +1044,29 @@ Explain why this session triggered the rule.`;
       .substring(0, 40) || 'custom-rule';
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const vscode = require('vscode') as typeof import('vscode');
-      const { callLlm } = await import('./panel-llm');
+      if (!llmProvider) return { markdown: ruleTemplate(id, prompt), error: NO_LLM };
 
       const messages = [
-        vscode.LanguageModelChatMessage.User(GENERATE_RULE_SYSTEM_PROMPT),
-        vscode.LanguageModelChatMessage.User(`Generate a complete detection rule for: ${prompt}\n\nUse id: ${id}`),
+        user(GENERATE_RULE_SYSTEM_PROMPT),
+        user(`Generate a complete detection rule for: ${prompt}\n\nUse id: ${id}`),
       ];
 
       const MAX_ATTEMPTS = 2;
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        const result = await callLlm(messages);
+        const result = await llmProvider.call(messages);
         const markdown = cleanRuleMarkdown(result);
         const issues = validateRuleMarkdown(markdown);
         if (issues.length === 0) return { markdown };
 
-        // Retry: tell the LLM what was wrong
-        messages.push(vscode.LanguageModelChatMessage.Assistant(result));
-        messages.push(vscode.LanguageModelChatMessage.User(
+        // Retry: tell the model what was wrong
+        messages.push(assistant(result));
+        messages.push(user(
           `The generated rule has issues:\n${issues.map(i => `- ${i}`).join('\n')}\n\nPlease fix and output the complete corrected rule markdown. No code fences around the output.`
         ));
       }
 
       // After retries, return the last attempt even if imperfect
-      const lastResult = await callLlm(messages);
+      const lastResult = await llmProvider.call(messages);
       return { markdown: cleanRuleMarkdown(lastResult) };
     } catch (err: unknown) {
       // Log so the Output channel shows why; fall back to a template so the
@@ -1184,7 +1178,7 @@ Explain why this session triggered the rule.`;
     const severity = isString(params?.severity) ? params.severity : undefined;
     const scope = isString(params?.scope) ? params.scope : undefined;
 
-    const result = await compileNaturalLanguageRule(prompt, { group, severity, scope });
+    const result = await compileNaturalLanguageRule(prompt, llmProvider, { group, severity, scope });
     return {
       markdown: result.markdown,
       valid: !!result.rule,

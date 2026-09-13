@@ -25,7 +25,7 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ## Reporting Issues
 
-Please use [GitHub Issues](https://github.com/microsoft/ai-engineer-coach/issues) to report bugs or
+Please use [GitHub Issues](https://github.com/hardkoded/ai-engineering-coach-plugin/issues) to report bugs or
 request features. Before filing a new issue, please check if one already exists.
 
 ## Security

@@ -10,7 +10,6 @@ discovered through [`plugin.json`](../plugin.json) per the
 | Skill | When to use |
 |---|---|
 | [ai-engineering-coach](ai-engineering-coach/SKILL.md) | Report on the user's own AI coding sessions |
-| [package-extension](package-extension/SKILL.md) | Build the `.vsix` via `npm run package` |
 | [update-docs](update-docs/SKILL.md) | Update or add a page under `docs/content/` |
 
 ## Layout

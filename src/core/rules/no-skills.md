@@ -22,7 +22,7 @@ Explore available skills in your IDE. Skills can help with specific frameworks, 
 
 # Examples
 Skills extend Copilot with domain expertise
-Check VS Code extensions for available skills
+Check your agent's skills directory for what is already installed
 
 # Detection Logic
 ```detect

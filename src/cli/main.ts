@@ -23,6 +23,7 @@ import {
   renderSummaryMarkdown,
 } from '../core/summary-export';
 import type { DateFilter } from '../core/types/session-types';
+import { ClaudeCliProvider } from './claude-llm';
 
 interface CliOptions {
   command: 'serve' | 'report';
@@ -209,6 +210,8 @@ export async function main(argv: string[]): Promise<number> {
     host: 'cli',
     parseAll: createParseAll(options.logsDirs),
     exportSummary: exportSummaryToCwd,
+    // Absent `claude`, the generative features report themselves unavailable instead of hanging.
+    llm: ClaudeCliProvider.detect(),
   });
   host.start();
 
