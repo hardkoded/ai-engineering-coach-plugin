@@ -10,6 +10,7 @@ import { registerAllBuiltinRules, loadPersonalRules, registerAllBuiltinMetrics }
 import { fillTemplate } from './rule-parser';
 import { parsePipeline, executePipeline, checkPipelineTrigger, resolveInheritance } from './rule-pipeline';
 import { isoWeek } from './helpers';
+import { HARNESS, isVsCodeHarness } from './constants';
 
 registerAllBuiltinRules();
 registerAllBuiltinMetrics();
@@ -270,9 +271,35 @@ export function getActiveDetectors(skipIdeDetectors: boolean): DetectorDefinitio
   return registry.filter(detector => !skipIdeDetectors || !detector.requiresIdeContext);
 }
 
+/* Harnesses that record IDE context: slash commands, attached instruction files, tool
+ * confirmations, todo snapshots. Terminal agents leave those request fields empty, so a
+ * rule that reads them scores their absence as a finding. Scoping such rules to the
+ * sessions that can actually populate the fields keeps them from firing on everyone
+ * else's data in the default all-harnesses view. */
+export function providesIdeContext(harness: string): boolean {
+  return isVsCodeHarness(harness) || harness === HARNESS.xcode;
+}
+
+/** Narrows a dataset to the sessions that record IDE context. Returns the input
+ *  untouched when every session already qualifies, which is the common case in VS Code. */
+function ideContextOnly(reqs: SessionRequest[], sessions: Session[]): { reqs: SessionRequest[]; sessions: Session[] } {
+  const ideSessions = sessions.filter(s => providesIdeContext(s.harness));
+  if (ideSessions.length === sessions.length) return { reqs, sessions };
+
+  const ideRequestIds = new Set<string>();
+  for (const session of ideSessions) {
+    for (const request of session.requests) ideRequestIds.add(request.requestId);
+  }
+  return { reqs: reqs.filter(r => ideRequestIds.has(r.requestId)), sessions: ideSessions };
+}
+
 export function runDetectors(reqs: SessionRequest[], sessions: Session[], skipIdeDetectors: boolean): AntiPattern[] {
+  const ideScoped = ideContextOnly(reqs, sessions);
   return getActiveDetectors(skipIdeDetectors)
-    .map(detector => detector.run({ reqs, sessions, skipIdeDetectors }))
+    .map(detector => {
+      const data = detector.requiresIdeContext ? ideScoped : { reqs, sessions };
+      return detector.run({ reqs: data.reqs, sessions: data.sessions, skipIdeDetectors });
+    })
     .filter((pattern): pattern is AntiPattern => pattern !== null);
 }
 
@@ -281,12 +308,16 @@ export function runDetectors(reqs: SessionRequest[], sessions: Session[], skipId
  */
 export function runEmitters(reqs: SessionRequest[], sessions: Session[], skipIdeDetectors: boolean): Map<string, DetectorEmission> {
   const rules = getAllRules();
+  const ideScoped = ideContextOnly(reqs, sessions);
   const results = new Map<string, DetectorEmission>();
   for (const rawRule of rules) {
     if (skipIdeDetectors && rawRule.requiresIdeContext) continue;
     const rule = resolveInheritance(rawRule);
     const pipeline = parsePipeline(rule);
-    results.set(rule.id, executePipeline(pipeline, rule, { reqs, sessions, skipIdeDetectors }));
+    // `rule`, not `rawRule`: a rule that inherits `requiresIdeContext` through `extends`
+    // must scope the same way the detector path does.
+    const data = rule.requiresIdeContext ? ideScoped : { reqs, sessions };
+    results.set(rule.id, executePipeline(pipeline, rule, { reqs: data.reqs, sessions: data.sessions, skipIdeDetectors }));
   }
   return results;
 }

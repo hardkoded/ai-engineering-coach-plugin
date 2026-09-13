@@ -3,26 +3,43 @@
  *  Licensed under the MIT License. See LICENSE in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* Canvas host: serves the dashboard webview assets and bridges the webview RPC
+/* Dashboard host: serves the dashboard webview assets and bridges the webview RPC
  * contract over HTTP so the same bundle that runs inside VS Code also runs as a
- * Copilot app canvas. Runs in a plain Node process (no `vscode` module), parses
- * sessions in-process, and answers pure RPC handlers directly. Agent-dependent
+ * Copilot app canvas or a standalone CLI. Runs in a plain Node process (no
+ * `vscode` module) and answers pure RPC handlers directly. Agent-dependent
  * methods (LLM generation, skill triage) return a graceful error because there
- * is no local language model in canvas mode. */
+ * is no local language model outside VS Code. */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { Analyzer } from '../core/analyzer';
 import { findLogsDirs, parseAllLogsAsyncDetailed, type LoadProgress, type ParseResult } from '../core/parser';
-import { getRpcHandler } from '../webview/panel-rpc';
+import type { DashboardHostKind } from '../webview/capabilities';
+import type { DateFilter } from '../core/types/session-types';
+import { getRpcHandler, setLlmProvider } from '../webview/panel-rpc';
+import { PanelRequestService } from '../webview/panel-request-service';
+import type { LlmProvider } from '../core/llm/provider';
+import type { ResponseSink } from '../webview/panel-shared';
 import { getDashboardShellHtml } from '../webview/dashboard-shell';
+
+/** Parses every log directory into the normalized session model. Injectable so the
+ *  CLI can fork a child process with a larger heap instead of parsing in-process. */
+export type ParseAllFn = (logsDirs: string[], onProgress?: (p: LoadProgress) => void) => Promise<ParseResult>;
 
 export interface CanvasHostOptions {
   /** Absolute path to the built `dist` directory (contains `webview/app.js` + `webview/styles.css`). */
   distDir: string;
   /** Name of the repo/folder the canvas was opened in; scopes the initial "Current" workspace filter. */
   repoName?: string;
+  /** Which non-VS-Code host is embedding the dashboard. Reported through `getCapabilities`. */
+  host?: DashboardHostKind;
+  /** Overrides the in-process parse. Defaults to `parseAllLogsAsyncDetailed`. */
+  parseAll?: ParseAllFn;
+  /** Writes the summary export. Without it the Share page's export button is a no-op stub. */
+  exportSummary?: (analyzer: Analyzer, filter?: DateFilter) => Promise<{ ok: boolean; cancelled?: boolean; folder?: string }>;
+  /** Language model for the generative features. Without one they report themselves unavailable. */
+  llm?: LlmProvider | null;
 }
 
 export interface CanvasHost {
@@ -33,9 +50,16 @@ export interface CanvasHost {
 
 type RequestEnvelope = { id?: unknown; method?: unknown; params?: unknown };
 
-/* Agent-only methods: require the local VS Code language model. The matching
- * UI surfaces are greyed out in canvas mode, but a returned error keeps any
- * stray caller from hanging. */
+/* Methods that need a language model. With a provider installed they run through the
+ * request service; without one they report themselves unavailable so the greyed-out UI
+ * has something to say and no caller hangs. */
+const WORKSPACE_SCANS = new Set<string>([
+  'getWorkspaceDeps',
+  'getSdlcToolAnalysis',
+  'getSdlcRepoScan',
+  'getSdlcGitHubData',
+]);
+
 const AGENT_ONLY = new Set<string>([
   'createSkill',
   'generateSkillContent',
@@ -57,13 +81,18 @@ const AGENT_ONLY = new Set<string>([
  * the still-visible pages render in a degraded state instead of erroring. */
 const HOST_STUBS: Record<string, () => unknown> = {
   exportSummary: () => ({ ok: false, cancelled: true }),
-  getWorkspaceDeps: () => ({ deps: [] }),
-  getSdlcToolAnalysis: () => ({ mcpServers: [] }),
-  getSdlcRepoScan: () => ({ repos: [] }),
-  getSdlcGitHubData: () => ({}),
   loadModelBudgets: () => ({}),
   saveModelBudgets: () => ({ ok: true }),
+  showOutput: () => ({ ok: true }),
+  // Opens the rule-trust review UI, which is a VS Code command. Outside VS Code
+  // `rule-loader` already treats personal rules as trusted, so there is nothing to review.
+  reviewLocalRules: () => ({ ok: false, error: 'Rule review is only available in the VS Code extension.' }),
 };
+
+/* Generation can take a while through a CLI-backed model; cap it so the UI never hangs. */
+const REQUEST_SERVICE_TIMEOUT_MS = 300_000;
+
+const NO_LLM = 'No language model available. Install the Claude Code CLI and make sure `claude` is on your PATH.';
 
 const MIME: Record<string, string> = {
   '.js': 'application/javascript; charset=utf-8',
@@ -81,6 +110,46 @@ export function createCanvasHost(options: CanvasHostOptions): CanvasHost {
   let ready = false;
   let started = false;
   const currentWorkspace = options.repoName ?? '';
+  const hostKind: DashboardHostKind = options.host ?? 'canvas';
+  const llm = options.llm ?? null;
+  setLlmProvider(llm);
+  const exportSummary = options.exportSummary ?? (async () => ({ ok: false, cancelled: true }));
+
+  /* The request service replies through a sink rather than returning, because it was built
+   * to post into a webview. One pending promise per call bridges it to request/response. */
+  let nextRequestId = 0;
+  const pending = new Map<string, (data: unknown) => void>();
+  const sink: ResponseSink = {
+    post(id, data) { pending.get(id)?.(data); pending.delete(id); },
+    event(method, data) { broadcast({ type: 'event', method, data }); },
+  };
+  /* Always constructed: several of its handlers are plain workspace scans that need no
+   * model. The model-backed ones are gated separately and never reach this stand-in. */
+  const unavailableLlm: LlmProvider = {
+    call: () => Promise.reject(new Error(NO_LLM)),
+    callJson: () => Promise.reject(new Error(NO_LLM)),
+  };
+  const requestService = new PanelRequestService(sink, () => analyzer, () => parseResult, llm ?? unavailableLlm, exportSummary);
+
+  /** Returns a promise when the request service owns the method, otherwise null. */
+  function runThroughRequestService(method: string, params: Record<string, unknown>): Promise<unknown> | null {
+    const id = `host-${nextRequestId++}`;
+    let accepted = false;
+    const result = new Promise<unknown>(resolve => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        resolve({ error: 'The language model did not respond in time.' });
+      }, REQUEST_SERVICE_TIMEOUT_MS);
+      pending.set(id, data => { clearTimeout(timer); resolve(data); });
+      accepted = requestService.tryHandle({ type: 'request', id, method: method as never, params });
+      if (!accepted) {
+        clearTimeout(timer);
+        pending.delete(id);
+      }
+    });
+    return accepted ? result : null;
+  }
+  const parseAll: ParseAllFn = options.parseAll ?? (async (dirs, onProgress) => (await parseAllLogsAsyncDetailed(dirs, onProgress)).result);
 
   function broadcast(payload: unknown): void {
     const line = `data: ${JSON.stringify(payload)}\n\n`;
@@ -126,9 +195,25 @@ export function createCanvasHost(options: CanvasHostOptions): CanvasHost {
   }
 
   function dispatchRpc(method: string, params: Record<string, unknown>): unknown {
-    if (method === 'getCapabilities') return { host: 'canvas', llm: false };
+    if (method === 'getCapabilities') return { host: hostKind, llm: llm !== null };
+    if (method === 'exportSummary' && options.exportSummary) {
+      if (!ready || !analyzer) return { error: 'Data is still loading.' };
+      return options.exportSummary(analyzer, params.filter as DateFilter | undefined);
+    }
     if (method in HOST_STUBS) return HOST_STUBS[method]();
-    if (AGENT_ONLY.has(method)) return { error: 'This feature requires the local agent in VS Code.' };
+    if (WORKSPACE_SCANS.has(method)) {
+      const scanned = runThroughRequestService(method, params);
+      if (scanned) return scanned;
+      return { deps: [], mcpServers: [], repos: [] };
+    }
+    if (AGENT_ONLY.has(method)) {
+      if (!llm) return { error: NO_LLM };
+      if (!ready || !analyzer || !parseResult) return { error: 'Data is still loading.' };
+      // Most generative methods live in the request service; `generateRule` and
+      // `explainOccurrence` are in the shared handler table, so fall through for those.
+      const handled = runThroughRequestService(method, params);
+      if (handled) return handled;
+    }
 
     if (!ready || !analyzer || !parseResult) return { error: 'Data is still loading.' };
 
@@ -204,7 +289,7 @@ export function createCanvasHost(options: CanvasHostOptions): CanvasHost {
     if (url === '/events') return handleEvents(req, res);
     if (url === '/' || url === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(getCanvasHtml());
+      res.end(getCanvasHtml(llm !== null));
       return;
     }
     if (url === '/app.js') return serveAsset(res, path.join(webviewDir, 'app.js'));
@@ -221,7 +306,7 @@ export function createCanvasHost(options: CanvasHostOptions): CanvasHost {
     void (async () => {
       try {
         const dirs = findLogsDirs();
-        const { result } = await parseAllLogsAsyncDetailed(dirs, (p) => {
+        const result = await parseAll(dirs, (p) => {
           lastProgress = p;
           broadcast({ type: 'progress', ...p });
         });
@@ -248,7 +333,7 @@ export function createCanvasHost(options: CanvasHostOptions): CanvasHost {
   return { handle, start, dispose };
 }
 
-function getCanvasHtml(): string {
+function getCanvasHtml(hasLlm: boolean): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -260,7 +345,7 @@ function getCanvasHtml(): string {
 <script>${BRIDGE_SHIM}</script>
 </head>
 <body>
-${getDashboardShellHtml({ includeSkillFinder: false, includeLevelUp: false })}
+${getDashboardShellHtml({ includeSkillFinder: hasLlm, includeLevelUp: hasLlm })}
 <script src="/app.js"></script>
 </body>
 </html>`;

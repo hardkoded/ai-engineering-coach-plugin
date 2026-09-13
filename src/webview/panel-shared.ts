@@ -5,7 +5,6 @@
 
 import * as crypto from 'crypto';
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { WebviewMessage, ErrorResult } from '../core/types';
 
 export type RequestMessage = Extract<WebviewMessage, { type: 'request' }>;
@@ -43,16 +42,11 @@ export function isRequestMessage(value: unknown): value is RequestMessage {
   return true;
 }
 
-export function postResponse(webview: vscode.Webview, id: string, data: unknown): void {
-  webview.postMessage({ type: 'response', id, data });
-}
-
-export function postError(webview: vscode.Webview, id: string, message: string, extra: Record<string, unknown> = {}): void {
-  webview.postMessage({ type: 'response', id, data: errorResult(message, extra) });
-}
-
-export function postEvent(webview: vscode.Webview, method: string, data: unknown): void {
-  webview.postMessage({ type: 'event', method, data });
+/** Where a request handler sends its reply. The host decides what that means: the HTTP
+ *  host resolves a pending promise, a test collects the payload. */
+export interface ResponseSink {
+  post(id: string, data: unknown): void;
+  event(method: string, data: unknown): void;
 }
 
 export function getNonce(): string {

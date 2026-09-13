@@ -12,7 +12,7 @@ import { AnalyzerBase } from './analyzer-base';
 import {
   computeWeeklyTrend, computeWeeklyScores,
 } from './detectors';
-import { getDetectorGroupCounts, runDetectors } from './detector-registry';
+import { getDetectorGroupCounts, providesIdeContext, runDetectors } from './detector-registry';
 
 function scoreToStatus(score: number): 'good' | 'needs-improvement' | 'critical' {
   return score >= 70 ? 'good' : score >= 40 ? 'needs-improvement' : 'critical';
@@ -244,7 +244,7 @@ export class PatternsAnalyzer extends AnalyzerBase {
       return enriched;
     });
 
-    const skipIdeDetectors = !!(f?.harness && !f.harness.startsWith('Local Agent') && f.harness !== 'Xcode');
+    const skipIdeDetectors = !!(f?.harness && !providesIdeContext(f.harness));
     const patterns = runDetectors(enrichedReqs, sessions, skipIdeDetectors);
     return this.buildAntiPatternResult(patterns, reqs, skipIdeDetectors);
   }

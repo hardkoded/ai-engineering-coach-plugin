@@ -6,6 +6,7 @@
 /* Config health scanning and scoring helpers. */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { ConfigFileInfo, HookCoverageInfo, Workspace } from './types';
 import { fileUriToPath } from './helpers';
@@ -74,7 +75,11 @@ function firstStringProperty(value: Record<string, unknown>, ...keys: string[]):
 
 export function resolveWorkspaceRoot(id: string, ws: Workspace): string | null {
   if (id.startsWith('claude-')) {
-    return resolveClaudeRoot(ws.path);
+    // `ws.path` is the session `cwd` whenever that directory still exists, and only
+    // falls back to the `~/.claude/projects/<encoded>` log directory when it does not.
+    // A checkout has no top-level `*.jsonl`, so reading the log directory is the
+    // exception, not the rule.
+    return isClaudeLogDir(ws.path) ? resolveClaudeRoot(ws.path) : (fs.existsSync(ws.path) ? ws.path : null);
   }
   if (id.startsWith('codex-') || id.startsWith('opencode-')) {
     return fs.existsSync(ws.path) ? ws.path : null;
@@ -102,6 +107,17 @@ function resolveCLIRoot(storagePath: string): string | null {
     }
   } catch { /* ignore */ }
   return null;
+}
+
+/** True for the Claude log tree — `~/.claude/projects` or one of its encoded project
+ *  directories — as opposed to a real checkout. The parser falls back to one of these
+ *  when the session `cwd` no longer exists on disk. */
+function isClaudeLogDir(dirPath: string): boolean {
+  // Resolve home exactly as `findClaudeDirs` does; `os.homedir()` and `$HOME` disagree
+  // under sudo and in some containers, which would let the log tree through as a checkout.
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  const projectsRoot = path.join(home, '.claude', 'projects');
+  return dirPath === projectsRoot || path.dirname(dirPath) === projectsRoot;
 }
 
 function resolveClaudeRoot(projectDir: string): string | null {

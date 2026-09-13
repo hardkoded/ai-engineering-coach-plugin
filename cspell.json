@@ -3,6 +3,9 @@
   "language": "en",
   "minWordLength": 5,
   "words": [
+    "vscodeignore",
+    "hardkoded",
+    "kblok",
     "aicoach",
     "acked",
     "affordances",
@@ -120,7 +123,6 @@
     "vitest",
     "vnode",
     "vnodes",
-    "vsce",
     "vscode",
     "workhours",
     "wordlist",
@@ -131,7 +133,6 @@
     "node_modules",
     "dist",
     "package-lock.json",
-    "*.vsix",
     ".git",
     "docs/build-pdf.sh",
     "docs/public/**"

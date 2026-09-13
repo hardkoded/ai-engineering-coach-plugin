@@ -14,6 +14,7 @@
 import { FIELD_SCHEMA, FUNCTION_CATALOG } from './dsl/index';
 import { parseRule } from './rule-parser';
 import type { DetectionRule } from './types/rule-types';
+import { user, type LlmProvider } from './llm/provider';
 
 /**
  * Result of compiling a natural-language description into a rule.
@@ -38,6 +39,7 @@ export interface CompilationResult {
  */
 export async function compileNaturalLanguageRule(
   prompt: string,
+  llm: LlmProvider | null,
   options?: {
     group?: string;
     severity?: string;
@@ -48,7 +50,7 @@ export async function compileNaturalLanguageRule(
 
   // Try LLM compilation first
   try {
-    const markdown = await compileLlm(prompt, options);
+    const markdown = await compileLlm(prompt, llm, options);
     if (markdown) {
       const rule = parseRule(markdown);
       if (rule) return { markdown, rule, usedLlm: true, notes };
@@ -68,37 +70,14 @@ export async function compileNaturalLanguageRule(
 
 async function compileLlm(
   prompt: string,
+  llm: LlmProvider | null,
   options?: { group?: string; severity?: string; scope?: string },
 ): Promise<string | null> {
-  // Dynamic import to avoid bundling vscode types
-  let vscode: typeof import('vscode');
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    vscode = require('vscode') as typeof import('vscode');
-  } catch {
-    return null;
-  }
-
-  const lm = vscode.lm;
-  if (!lm) return null;
-
-  const models = await lm.selectChatModels({ family: 'gpt-4.1' });
-  const model = models[0];
-  if (!model) return null;
+  if (!llm) return null;
 
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(prompt, options);
-
-  const messages = [
-    vscode.LanguageModelChatMessage.User(systemPrompt),
-    vscode.LanguageModelChatMessage.User(userPrompt),
-  ];
-
-  const response = await model.sendRequest(messages, {});
-  let result = '';
-  for await (const chunk of response.text) {
-    result += chunk;
-  }
+  const result = await llm.call([user(systemPrompt), user(userPrompt)]);
 
   // Extract markdown from code block if wrapped
   const fenced = result.match(/```(?:markdown)?\s*\n([\s\S]*?)```/);
@@ -111,7 +90,7 @@ function buildSystemPrompt(): string {
   const fields = FIELD_SCHEMA.map(f => `  ${f.name}: ${f.type} — ${f.description}`).join('\n');
   const functions = FUNCTION_CATALOG.map(f => `  ${f.signature} — ${f.description}`).join('\n');
 
-  return `You are a rule compiler for AI Engineer Coach, a VS Code extension that analyzes coding assistant usage patterns.
+  return `You are a rule compiler for AI Engineer Coach, a tool that analyzes coding assistant usage patterns.
 
 Your job: convert natural-language descriptions into structured rule markdown files.
 

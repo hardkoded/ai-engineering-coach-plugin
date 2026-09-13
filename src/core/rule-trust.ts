@@ -28,10 +28,10 @@
 import { createHash } from 'crypto';
 import * as path from 'path';
 
-/** Minimum surface of `vscode.Memento` that we need. */
+/** Minimum surface of a key-value store that we need. */
 export interface TrustMemento {
   get<T>(key: string, defaultValue: T): T;
-  update(key: string, value: unknown): Thenable<void> | Promise<void>;
+  update(key: string, value: unknown): PromiseLike<void> | Promise<void>;
 }
 
 export interface ApprovedEntry {

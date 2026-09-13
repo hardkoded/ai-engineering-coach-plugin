@@ -22,3 +22,7 @@ marketing/
 
 # Playwright test results
 test-results/
+
+# Summary exports written by the CLI / Share page
+ai-engineer-coach-summary-*.md
+ai-engineer-coach-summary-*.json

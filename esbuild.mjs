@@ -9,23 +9,7 @@ import * as path from 'path';
 
 const isWatch = process.argv.includes('--watch');
 
-// Stamp the build time into the bundle so the UI can show which build is running.
-const define = { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) };
-
-// Bundle the extension host
-const extensionBuild = esbuild.build({
-  entryPoints: ['src/extension.ts'],
-  bundle: true,
-  platform: 'node',
-  target: 'es2022',
-  format: 'cjs',
-  outfile: 'dist/extension.js',
-  sourcemap: true,
-  external: ['vscode'],
-  define,
-});
-
-// Bundle the warm-up worker (runs off the extension host thread)
+// Bundle the warm-up worker (runs off the main thread)
 const workerBuild = esbuild.build({
   entryPoints: ['src/core/warm-up-worker.ts'],
   bundle: true,
@@ -37,7 +21,7 @@ const workerBuild = esbuild.build({
   external: ['vscode'],
 });
 
-// Bundle the parse worker (runs the full parse pipeline off the extension host thread)
+// Bundle the parse worker (runs the full parse pipeline off the main thread)
 const parseWorkerBuild = esbuild.build({
   entryPoints: ['src/core/parse-worker.ts'],
   bundle: true,
@@ -73,6 +57,19 @@ const canvasHostBuild = esbuild.build({
   external: ['vscode'],
 });
 
+// Bundle the standalone CLI (serves the webview over localhost; no vscode)
+const cliBuild = esbuild.build({
+  entryPoints: ['src/cli/main.ts'],
+  bundle: true,
+  platform: 'node',
+  target: 'es2022',
+  format: 'cjs',
+  outfile: 'dist/cli.cjs',
+  sourcemap: true,
+  external: ['vscode'],
+  banner: { js: '#!/usr/bin/env node' },
+});
+
 // Bundle the webview script
 const webviewBuild = esbuild.build({
   entryPoints: ['src/webview/app.ts'],
@@ -84,7 +81,10 @@ const webviewBuild = esbuild.build({
   sourcemap: true,
 });
 
-await Promise.all([extensionBuild, workerBuild, parseWorkerBuild, cacheWriteWorkerBuild, canvasHostBuild, webviewBuild]);
+await Promise.all([workerBuild, parseWorkerBuild, cacheWriteWorkerBuild, canvasHostBuild, cliBuild, webviewBuild]);
+
+// The CLI is a `bin` entry point; npm does not set the execute bit for us on a local build.
+fs.chmodSync('dist/cli.cjs', 0o755);
 
 // Copy static webview assets
 const webviewDist = 'dist/webview';
@@ -134,17 +134,6 @@ fs.copyFileSync('src/webview/styles-sidebar.css', path.join(webviewDist, 'sideba
 console.log('Build complete.');
 
 if (isWatch) {
-  const ctx1 = await esbuild.context({
-    entryPoints: ['src/extension.ts'],
-    bundle: true,
-    platform: 'node',
-    target: 'es2022',
-    format: 'cjs',
-    outfile: 'dist/extension.js',
-    sourcemap: true,
-    external: ['vscode'],
-    define,
-  });
   const ctx2 = await esbuild.context({
     entryPoints: ['src/core/warm-up-worker.ts'],
     bundle: true,
@@ -185,6 +174,17 @@ if (isWatch) {
     sourcemap: true,
     external: ['vscode'],
   });
+  const ctxCli = await esbuild.context({
+    entryPoints: ['src/cli/main.ts'],
+    bundle: true,
+    platform: 'node',
+    target: 'es2022',
+    format: 'cjs',
+    outfile: 'dist/cli.cjs',
+    sourcemap: true,
+    external: ['vscode'],
+    banner: { js: '#!/usr/bin/env node' },
+  });
   const ctx4 = await esbuild.context({
     entryPoints: ['src/webview/app.ts'],
     bundle: true,
@@ -194,7 +194,7 @@ if (isWatch) {
     outfile: 'dist/webview/app.js',
     sourcemap: true,
   });
-  await Promise.all([ctx1.watch(), ctx2.watch(), ctx3.watch(), ctx4.watch(), ctx5.watch(), ctxCanvas.watch()]);
+  await Promise.all([ctx2.watch(), ctx3.watch(), ctx4.watch(), ctx5.watch(), ctxCanvas.watch(), ctxCli.watch()]);
   for (const source of cssSources) {
     fs.watch(source, () => {
       try {

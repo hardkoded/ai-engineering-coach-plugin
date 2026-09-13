@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pre-publish smoke test: verifies the .vsix package is valid and the
+ * Smoke test: verifies the built bundle is valid and the
  * extension can be loaded.
  */
 import { execSync } from 'child_process';

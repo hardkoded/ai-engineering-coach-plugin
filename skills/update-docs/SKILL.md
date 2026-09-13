@@ -1,8 +1,8 @@
 ---
 name: update-docs
-description: Update or add a documentation page under docs/content/ (Hugo static site).
-when_to_use: User asks to "update the docs", "add a doc page", "fix the documentation", or
-  changes a feature whose page is published at https://microsoft.github.io/AI-Engineering-Coach/.
+description: Update or add a documentation page under docs/content/ in this repo's Hugo site. Use when the user asks to update the docs, add a doc page, or fix documentation, or when changing a feature whose page is published to the docs site.
+license: MIT
+compatibility: Requires a checkout of this repository and Node.js 20+.
 ---
 
 # Update Docs

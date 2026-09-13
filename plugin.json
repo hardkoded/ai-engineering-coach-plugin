@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.1.0/plugin.schema.json",
+  "name": "ai-engineering-coach-plugin",
+  "version": "0.1.0",
+  "description": "The agent-plugin edition of Microsoft's AI-Engineering-Coach. Analyze your own AI coding sessions across Claude Code, Codex, OpenCode and GitHub Copilot: practice scores, anti-patterns, code output and context health, computed entirely on your machine.",
+  "author": {
+    "name": "Darío Kondratiuk",
+    "url": "https://github.com/kblok"
+  },
+  "homepage": "https://github.com/hardkoded/ai-engineering-coach-plugin",
+  "repository": "https://github.com/hardkoded/ai-engineering-coach-plugin",
+  "license": "MIT",
+  "keywords": ["ai", "agents", "analytics", "coaching", "claude-code", "codex", "copilot", "anti-patterns"]
+}
