@@ -178,10 +178,12 @@ function openBrowser(url: string): void {
 async function runReport(options: CliOptions): Promise<number> {
   keepStdoutClean();
   const parseAll = createParseAll(options.logsDirs, true);
+  // Carriage returns only redraw on a terminal; piped to a file they pile up as noise.
+  const showProgress = process.stderr.isTTY === true;
   const result = await parseAll(findLogsDirs(), p => {
-    process.stderr.write(`\rParsing… ${Math.round(p.pct)}%${' '.repeat(20)}`);
+    if (showProgress) process.stderr.write(`\rParsing… ${Math.round(p.pct)}%${' '.repeat(20)}`);
   });
-  process.stderr.write('\r');
+  if (showProgress) process.stderr.write('\r');
 
   const analyzer = new Analyzer(result.sessions, result.editLocIndex, result.workspaces);
   const report = buildSummaryExportFromAnalyzer(analyzer, options.filter);
