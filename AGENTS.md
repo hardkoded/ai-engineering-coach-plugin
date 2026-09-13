@@ -48,7 +48,8 @@ AI-Engineering-Coach/
 │   ├── AUTHORING_RULES.md      # How to author a rule or metric (DSL + tests)
 │   └── hugo.toml
 ├── scripts/                    # Packaging, smoke tests, data inventory tools
-├── skills/                     # Reusable instructions for recurring agentic tasks
+├── plugin.json                 # Agent Plugins manifest (agent-plugins.org)
+├── skills/<name>/SKILL.md      # Agent Skills shipped by the plugin
 ├── tests/e2e/                  # Playwright end-to-end tests
 └── AGENTS.md                   # You are here
 ```
@@ -66,7 +67,7 @@ AI-Engineering-Coach/
 | Unit tests (vitest) | `npm test` |
 | All checks (CI gate) | `npm run check` |
 | End-to-end (Playwright) | `npm run test:e2e` |
-| Package the VSIX | `npm run package` (see [skills/package-extension.md](skills/package-extension.md)) |
+| Package the VSIX | `npm run package` (see [skills/package-extension/](skills/package-extension/)) |
 | Run the standalone CLI | `node dist/cli.cjs` (dashboard) or `node dist/cli.cjs report` |
 | Bundle-size budget | `npm run check-size` |
 
@@ -75,16 +76,18 @@ every PR. Run those locally before pushing.
 
 ## Skills
 
-Repo-specific instructions for recurring tasks live in [`skills/`](skills/). They are symlinked
-into [`.claude/skills/`](.claude/skills/) and [`.github/instructions/`](.github/instructions/)
-so popular agent harnesses pick them up automatically. See
+Skills live in [`skills/<name>/SKILL.md`](skills/) and follow the
+[Agent Skills specification](https://agentskills.io/specification). They are discovered through
+[`plugin.json`](plugin.json) per the [Agent Plugins standard](https://agent-plugins.org/), and
+symlinked into [`.claude/skills/`](.claude/skills/) and [`.github/skills/`](.github/skills/) so
+agents pick them up from a checkout too. `npm test` validates both specs. See
 [`skills/README.md`](skills/README.md) for the authoring format.
 
 Available today:
 
-- [`skills/update-docs.md`](skills/update-docs.md) — author or update a Hugo doc page.
-- [`skills/package-extension.md`](skills/package-extension.md) — produce an installable `.vsix`.
-- [`skills/coach-report.md`](skills/coach-report.md) — summarize the user's sessions via the CLI.
+- [`skills/ai-engineering-coach/`](skills/ai-engineering-coach/) — report on the user's own sessions.
+- [`skills/update-docs/`](skills/update-docs/) — author or update a Hugo doc page.
+- [`skills/package-extension/`](skills/package-extension/) — produce an installable `.vsix`.
 
 ## Rule and metric authoring
 

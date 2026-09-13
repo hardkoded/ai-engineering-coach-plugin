@@ -1,173 +1,157 @@
-<h1 align="center">AI Engineer Coach</h1>
+<h1 align="center">AI Engineering Coach</h1>
 
 <p align="center">
 <strong>better agentic engineering.</strong><br>
-Analyze your AI coding assistant usage — any harness, one dashboard.
+An agent plugin that analyzes how you actually work with AI coding agents — any tool, one report.
 </p>
 
 <p align="center">
 <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-<img alt="VS Code 1.115+" src="https://img.shields.io/badge/VS%20Code-1.115%2B-007ACC">
-</p>
-
-<br>
-
-<p align="center">
-  
-https://github.com/user-attachments/assets/9f0239bf-20e0-459f-b137-17cce0edd1b2
-
-<sub>This video contains AI-generated content.</sub>
-
+<a href="https://agent-plugins.org/"><img alt="Agent Plugins 1.1.0" src="https://img.shields.io/badge/Agent%20Plugins-1.1.0-6e40c9"></a>
+<a href="https://agentskills.io/specification"><img alt="Agent Skills" src="https://img.shields.io/badge/Agent%20Skills-compatible-10b981"></a>
 </p>
 
 ---
 
-## What it does
+## What this is
 
-AI Engineer Coach reads your local AI session logs and turns them into actionable insights — no data leaves your machine.
+Your AI coding tools already write a detailed log of every session to your disk. This plugin
+reads those logs and tells you how you are actually working: where your prompts are weak,
+which habits cost you time, how much code the agent writes versus you, and whether your
+repos are set up for agents at all.
 
-- **Track progress** -- practice scores, weekly trends, daily activity charts
-- **Detect anti-patterns** -- 45 rules across prompt quality, session hygiene, code review, tool mastery, and context management
-- **Measure output** -- AI-generated code volume by language, workspace, model, and harness
-- **Discover skills** -- find repeated prompts and turn them into reusable skills
-- **Score context health** — agentic readiness checks, instruction-file audits, workspace context maps
+Ask your agent *"how am I using AI?"* and it answers from your own data. Nothing is uploaded.
+
+It reads **Claude Code**, **Codex**, **OpenCode**, **GitHub Copilot** (VS Code, CLI, and the
+desktop app), and **Copilot for Xcode**.
+
+> This is a fork of [microsoft/AI-Engineering-Coach](https://github.com/microsoft/AI-Engineering-Coach),
+> repackaged as a portable agent plugin and given a standalone CLI so it runs without VS Code.
+> See [Relationship to upstream](#relationship-to-upstream).
+
+---
+
+## Install
+
+The repo *is* the plugin: [`plugin.json`](plugin.json) at the root, skills under
+[`skills/`](skills/), per the [Agent Plugins](https://agent-plugins.org/) standard.
+
+```bash
+git clone https://github.com/hardkoded/ai-engineering-coach-plugin.git
+cd ai-engineering-coach-plugin
+npm ci && npm run build
+```
+
+Then point your agent at it. For **Claude Code**, link the skills into your personal skills
+directory so they work from any project:
+
+```bash
+ln -s "$PWD/skills/ai-engineering-coach" ~/.claude/skills/ai-engineering-coach
+```
+
+Any client that implements the Agent Plugins standard can instead load the directory as a
+plugin and discover the same skills through `plugin.json`. Clients that read skills from a
+checkout will also find them in [`.claude/skills/`](.claude/skills/) and
+[`.github/skills/`](.github/skills/), which symlink to the same files.
+
+---
+
+## Use it
+
+Ask in plain language — the skill description covers these triggers:
+
+> how am I using AI?
+> review my last month of Claude Code sessions
+> what are my worst anti-patterns?
+> is this repo set up properly for agents?
+
+Your agent runs the CLI and reads the result. You can also run it yourself:
+
+```bash
+# a summary you can read
+node dist/cli.cjs report
+
+# just your Claude Code sessions, last 30 days
+node dist/cli.cjs report --since 30d --harness Claude
+
+# structured output
+node dist/cli.cjs report --json | jq .
+```
+
+| Flag | Effect |
+|---|---|
+| `--since <n>d` | Only the last `n` days |
+| `--harness <name>` | One tool: `Claude`, `Codex`, `OpenCode`, `Local Agent`, `Xcode`, `GitHub Copilot CLI`, `GitHub Copilot App` |
+| `--workspace <id>` | A single workspace |
+| `--logs-dir <path>` | An extra VS Code or Xcode log directory (repeatable) |
+
+stdout is the document and nothing else — progress and parse diagnostics go to stderr, so
+piping into `jq` works.
+
+---
+
+## The dashboard
+
+For exploring rather than reading, the same data renders as a local web app:
+
+```bash
+node dist/cli.cjs
+```
+
+It prints a `http://127.0.0.1:<port>` URL and opens your browser. `--no-open` skips that,
+`--port <n>` pins the port.
 
 <details>
 <summary><strong>Screenshots</strong></summary>
 <br>
 <p align="center"><img src="assets/screen-timeline.png" alt="Timeline" width="820"></p>
 <p align="center"><img src="assets/screen-output.png" alt="Code Output" width="820"></p>
-<p align="center"><img src="assets/screen-consumption.png" alt="Premium Request Consumption" width="820"></p>
-<p align="center"><img src="assets/screen-patterns-projects.png" alt="Activity Patterns - Projects" width="820"></p>
-<p align="center"><img src="assets/screen-patterns-workhours.png" alt="Activity Patterns - Work Hours" width="820"></p>
+<p align="center"><img src="assets/screen-patterns-projects.png" alt="Activity Patterns" width="820"></p>
 <p align="center"><img src="assets/screen-antipatterns.png" alt="Anti-Patterns" width="820"></p>
-<p align="center"><img src="assets/screen-skill-finder.png" alt="Skill Finder" width="820"></p>
 <p align="center"><img src="assets/screen-context-quality.png" alt="Context Quality" width="820"></p>
-<p align="center"><img src="assets/screen-context-management.png" alt="Context Management" width="820"></p>
 <p align="center"><img src="assets/screen-learning.png" alt="Learning Center" width="820"></p>
-<p align="center"><img src="assets/screen-achievements.png" alt="Achievements" width="820"></p>
-<p align="center"><img src="assets/screen-sdlc.png" alt="Agentic SDLC" width="820"></p>
-<p align="center"><img src="assets/screen-share.png" alt="Share Your Stats" width="820"></p>
 </details>
+
+Session parsing runs in a forked process with its own heap, so a multi-gigabyte
+`~/.claude/projects` will not exhaust memory. The first run takes a couple of minutes; logs
+from terminal agents are re-parsed each time rather than cached.
 
 ---
 
-## Installation
+## Skills
 
-The extension is not published to a marketplace or Releases page, so you build the `.vsix` yourself and install it. Pick whichever build path fits your setup.
+| Skill | What it does |
+|---|---|
+| [`ai-engineering-coach`](skills/ai-engineering-coach/SKILL.md) | Reports on your sessions — scores, anti-patterns, code output, activity |
+| [`package-extension`](skills/package-extension/SKILL.md) | Builds the VS Code extension into an installable `.vsix` |
+| [`update-docs`](skills/update-docs/SKILL.md) | Adds or edits a page in the Hugo docs site |
 
-### Path 1 -- Dev Container build (no local Node.js/npm)
+`npm test` validates `plugin.json` and every `SKILL.md` against both specs
+([`src/plugin/manifest.ts`](src/plugin/manifest.ts)), so a malformed skill fails CI rather
+than failing silently in someone's agent.
 
-Prerequisites:
+---
 
-- VS Code
-- Dev Containers extension
-- Docker or Podman
+## Also runs as a VS Code extension
 
-Steps:
-
-1. Clone the repo and open it in VS Code.
-2. Reopen in container.
-3. Run:
-
-```bash
-npm ci
-npm run package
-```
-
-4. Install the generated `.vsix` (see [Install the built VSIX](#install-the-built-vsix) below).
-
-### Path 2 -- Local build
-
-Prerequisites:
-
-- VS Code
-- Node.js and npm
-
-Steps:
+The original packaging still works, and it is the only way to get the AI-assisted features
+(Skill Finder, Learning Center, and the AI context review), which need the VS Code language
+model API.
 
 ```bash
-git clone https://github.com/microsoft/ai-engineering-coach.git
-cd ai-engineering-coach
-npm ci
-npm run package
-```
-
-Then install the generated `.vsix` (see below).
-
-### Install the built VSIX
-
-**macOS / Linux**
-
-```bash
+npm ci && npm run package
 code --install-extension ai-engineer-coach-*.vsix
 ```
 
-**Windows / PowerShell**
+Then run **AI Engineer Coach: Open Dashboard** from the command palette. On Windows, use
+`code --install-extension (Get-ChildItem . -Filter 'ai-engineer-coach-*.vsix' | Select-Object -First 1).FullName`,
+or install from the palette with **Install from VSIX**.
 
-```powershell
-code --install-extension (Get-ChildItem . -Filter 'ai-engineer-coach-*.vsix' | Select-Object -First 1).FullName
-```
-
-If the CLI does not work, install it from the VS Code UI: press `Ctrl+Shift+P`, type **Install from VSIX**, then browse to the `.vsix` file and select it.
-
-After install:
-
-1. Open the command palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run **AI Engineer Coach: Open Dashboard**
-3. Navigate pages from the sidebar, filter by workspace or harness
+The dashboard also runs as a canvas inside the GitHub Copilot app — open this repo as a
+project there and pick the **AI Engineer Coach** canvas. Both hosts share the webview bundle
+and the analysis code with the CLI.
 
 ---
-
-## Run as a standalone CLI
-
-If you work in a terminal, you do not need VS Code or the Copilot app at all. Build once, then
-run the dashboard as a local web app:
-
-```bash
-npm ci && npm run build
-node dist/cli.cjs
-```
-
-It prints a `http://127.0.0.1:<port>` URL and opens your browser. Add `--no-open` to skip that,
-`--port <n>` to pin the port, or `--logs-dir <path>` to scan an extra VS Code or Xcode log
-directory. Claude, Codex and OpenCode logs are always discovered automatically.
-
-There is also a report mode that writes a summary to stdout, which is what you want when an
-agent is reading it rather than a person:
-
-```bash
-node dist/cli.cjs report --since 30d --harness Claude
-node dist/cli.cjs report --json | jq .
-```
-
-Session parsing runs in a forked process with its own heap, so a multi-gigabyte
-`~/.claude/projects` will not exhaust memory. The AI-powered features (Skill Finder, Learning
-Center, Context review) still need the VS Code language model and are hidden here.
-
----
-
-## Run as a canvas in the GitHub Copilot app
-
-The same dashboard also runs as a canvas inside the GitHub Copilot app, so you do not need VS Code to use it.
-
-A canvas is an interactive side panel in the GitHub Copilot app. Rather than replying only in chat, the agent can open a canvas to show rich, task-specific UI that you view and interact with directly while you keep working. Extensions register their own canvases, and this repo ships one named **AI Engineer Coach** under [`.github/extensions/ai-engineer-coach/`](.github/extensions/ai-engineer-coach/). It reuses the exact webview bundle from the VS Code extension and parses your local session logs in process, so nothing leaves your machine.
-
-To open it:
-
-1. Clone this repo and open it as a project in the GitHub Copilot app.
-2. Build the project once:
-
-```bash
-npm install && npm run build
-```
-
-3. Open the **AI Engineer Coach** canvas. On a fresh clone it shows a setup card with the build command and reloads into the full dashboard once the build finishes. No manual reopen needed.
-
-A few features depend on the local VS Code language model and are hidden in canvas mode: **Skill Finder**, **Learning Center**, the **Level Up** section, and the **Context Health** AI review. Everything driven by your on-disk logs (Dashboard, Timeline, Coding Moments, Output, Patterns, Anti-Patterns) works the same. App sessions show up as **GitHub Copilot App** and terminal sessions as **GitHub Copilot CLI** in the harness breakdown.
-
----
-
 ## Pages
 
 ### Observe
@@ -225,14 +209,36 @@ image requests.
 | **Agentic SDLC**    | How you use AI across the full software-development lifecycle                    |
 | **Share**           | Generate a shareable stat card and export Markdown/JSON summaries               |
 
+**Skill Finder**, **Learning Center**, and the AI review on **Context Health** need the VS Code
+language model and are hidden in the CLI and the Copilot canvas. **Rule Playground** and
+**Data Explorer** have no sidebar entry yet — reach them from the Anti-Patterns page.
+
 ---
 
 ## Privacy
 
-- **Read-only** — the extension never modifies your session files
-- **Local analysis** — all parsing and analytics run entirely on your machine
-- **No proprietary telemetry** — the extension does not phone home or collect usage data
-- **Optional AI features** — some features (rule compiler, skill finder, context review) use the VS Code built-in Copilot language model API when explicitly invoked by the user
+- **Read-only** — never modifies your session files
+- **Local analysis** — all parsing and analytics run on your machine
+- **No telemetry** — nothing phones home, and the core analysis paths make no network calls
+- **Optional AI features** — Skill Finder, Learning Center and the context review call the
+  VS Code language model, and only when you explicitly invoke them. They are unavailable in
+  the CLI, where the dashboard reads your logs and nothing else.
+
+---
+
+## Relationship to upstream
+
+Forked from [microsoft/AI-Engineering-Coach](https://github.com/microsoft/AI-Engineering-Coach),
+an open-source community effort by Microsoft employees. The analysis engine, rules, and
+dashboard are theirs. This fork adds:
+
+- A standalone CLI, so the dashboard and a stdout report run without VS Code or the Copilot app.
+- Agent Plugins and Agent Skills packaging, so any compatible agent can use it.
+- Fixes for analyzing terminal agents: Claude Code workspaces were dropped from Context Health
+  entirely, and eleven IDE-only rules scored terminal sessions against fields those tools
+  never record.
+
+Upstream is the place for issues about the analysis itself. MIT licensed, like the original.
 
 ---
 
@@ -256,4 +262,9 @@ Any use of third-party trademarks or logos are subject to those third-party's po
 
 ## Disclaimer
 
-This project is an open-source community effort by Microsoft employees. It is **not** an official Microsoft product and is not part of any Microsoft service or support offering. It is provided as-is with no warranties or guarantees.
+This is an independent fork, maintained by [@kblok](https://github.com/kblok) under the
+[hardkoded](https://github.com/hardkoded) organization, and not affiliated with or endorsed by
+Microsoft. The upstream project it derives from is an open-source community
+effort by Microsoft employees, itself **not** an official Microsoft product and not part of any
+Microsoft service or support offering. Neither this fork nor the original carries any warranty
+or guarantee; both are provided as-is.

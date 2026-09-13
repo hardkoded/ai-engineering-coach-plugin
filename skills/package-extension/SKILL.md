@@ -1,8 +1,8 @@
 ---
 name: package-extension
-description: Build the AI Engineer Coach VS Code extension into an installable .vsix.
-when_to_use: User asks to "package the extension", "build a vsix", "make a release artifact",
-  or wants to test a local build in VS Code.
+description: Build the AI Engineer Coach VS Code extension into an installable .vsix. Use when the user asks to package the extension, build a vsix, make a release artifact, or test a local build in VS Code.
+license: MIT
+compatibility: Requires a checkout of this repository and Node.js 20+.
 ---
 
 # Package Extension
