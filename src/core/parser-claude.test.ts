@@ -13,7 +13,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import { EditLocIndex } from './edit-loc-diff';
-import { parseClaudeSessions } from './parser-claude';
+import { parseClaudeSessions, isSyntheticUserText } from './parser-claude';
 
 /** os.tmpdir() on Windows often returns 8.3 short names (e.g. TAMASB~1)
  *  that don't match readdirSync output. Resolve to the long form so
@@ -592,5 +592,43 @@ describe('parseClaudeSessions', () => {
       expect(session.workspaceRootPath).toBe(cwd);
     });
     fs.rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
+describe('synthetic user text', () => {
+  /* Claude Code writes these with the `user` role. Counting them as prompts made the top
+   * repeated-prompt clusters pure harness plumbing, which left Skill Finder with nothing
+   * real to match against. */
+  it('rejects the messages the harness injects', () => {
+    const synthetic = [
+      'Base directory for this skill: /Users/me/.claude/skills/deploy\n\n# deploy\n',
+      '(Re-invocation of /pr-chains — the skill instructions were previously loaded)',
+      'Stop hook feedback:\n[get open PRs]: status check',
+      'UserPromptSubmit hook: something',
+      '[Image source: /Users/me/.claude/image-cache/abc.png]',
+      '[Image: source: /Users/me/.claude/image-cache/abc.png]',
+      '<task-notification>\n<task-id>abc</task-id>',
+      'Another Claude session sent a message:\n<teammate-message teammate_id="w1">hi</teammate-message>',
+      '<system-reminder>be careful</system-reminder>',
+      '<command-name>/foo</command-name>',
+      '<local-command-stdout>done</local-command-stdout>',
+      '[Request interrupted by user]',
+    ];
+    for (const text of synthetic) {
+      expect(isSyntheticUserText(text), text.slice(0, 40)).toBe(true);
+    }
+  });
+
+  it('keeps prompts a developer actually typed', () => {
+    const real = [
+      'Refactor the auth middleware to use JWT',
+      'why is the build failing?',
+      'Base directory layout looks wrong — can you check?',
+      'Add a test for the image source parser',
+      'fix',
+    ];
+    for (const text of real) {
+      expect(isSyntheticUserText(text), text.slice(0, 40)).toBe(false);
+    }
   });
 });

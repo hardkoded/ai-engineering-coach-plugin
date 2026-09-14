@@ -197,12 +197,38 @@ function userHasText(line: ClaudeLine): boolean {
     return false;
   }
   if (text.length === 0) return false;
-  // Claude wraps slash-command input/output in <command-...> / <local-command-...> tags
-  if (/^<(local-)?command-/.test(text)) return false;
-  // Interrupt markers are auto-injected when the user cancels a tool call
-  if (text.startsWith('[Request interrupted')) return false;
-  return true;
+  return !isSyntheticUserText(text);
 }
+
+/* Claude Code writes a number of its own messages with the `user` role: skill preambles,
+ * hook output, image markers, interrupt notices. They are not prompts the developer typed,
+ * and counting them wrecks every prompt-quality signal — they dominated the repeated-prompt
+ * clusters and left Skill Finder matching against the harness's own plumbing. */
+export function isSyntheticUserText(text: string): boolean {
+  return SYNTHETIC_USER_TEXT.some(pattern => pattern.test(text));
+}
+
+const SYNTHETIC_USER_TEXT: RegExp[] = [
+  // Slash-command input and output wrappers.
+  /^<(local-)?command-/,
+  // Injected when the user cancels a tool call.
+  /^\[Request interrupted/,
+  // Preamble prepended when a skill is loaded.
+  /^Base directory for this skill:/,
+  // Emitted when a skill is re-entered without reloading its instructions.
+  /^\(Re-invocation of \//,
+  // Output a Stop or SessionStart hook feeds back into the conversation.
+  /^(Stop hook feedback|SessionStart hook|UserPromptSubmit hook|PreToolUse hook|PostToolUse hook):/,
+  // Placeholder standing in for a pasted or captured image. Both spellings occur.
+  /^\[Image:? ?source:/,
+  // System reminders injected around the real turn.
+  /^<system-reminder>/,
+  // Background-task completion notices delivered as a user turn.
+  /^<task-notification>/,
+  // Messages relayed from another agent session rather than from the developer.
+  /^Another Claude session sent a message:/,
+  /^<teammate-message\b/,
+];
 
 function getTimestamp(timestamp?: string): number | null {
   return timestamp ? new Date(timestamp).getTime() : null;
